@@ -179,6 +179,7 @@ def login_page():
             else:
                 st.error("Invalid username or password.")
 
+
 if not st.session_state.get("authenticated"):
     login_page()
     st.stop()
