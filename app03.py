@@ -273,9 +273,14 @@ def exec_one(q: str, p: dict = None, fetchone: bool = False):
     """Run INSERT / UPDATE / DELETE (optionally return first row)."""
     try:
         rows = _run_sql(q, p)
-        if fetchone and rows:
-            first = rows[0]
-            return tuple(first.values())
+        if fetchone:
+            # rows may be a list of dicts, a single dict, or wrapped jsonb
+            if isinstance(rows, list) and len(rows) > 0:
+                first = rows[0]
+                if isinstance(first, dict):
+                    return tuple(first.values())
+            elif isinstance(rows, dict):
+                return tuple(rows.values())
         return None
     except Exception as e:
         raise RuntimeError(f"DB error: {e}")
