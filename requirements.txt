@@ -1,7 +1,6 @@
 streamlit
 pandas
 sqlalchemy
-psycopg2-binary
 matplotlib
 openpyxl
 supabase
