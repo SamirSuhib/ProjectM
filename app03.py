@@ -178,6 +178,9 @@ def login_page():
                 st.rerun()
             else:
                 st.error("Invalid username or password.")
+        st.markdown("<p style='text-align:center;color:#475569;font-size:0.75rem;margin-top:16px'>"
+                    "admin / admin123 &nbsp;·&nbsp; operator / plant2024</p>",
+                    unsafe_allow_html=True)
 
 if not st.session_state.get("authenticated"):
     login_page()
@@ -696,32 +699,35 @@ st.markdown("""
     border-radius: 50% !important;
     width: 36px !important;
     height: 36px !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
     box-shadow: 0 2px 8px rgba(0,0,0,0.4) !important;
     transition: all 0.2s !important;
-    overflow: hidden !important;
     position: relative !important;
 }
 [data-testid="stSidebarCollapsedControl"]:hover {
     background: #22c55e !important;
     border-color: #22c55e !important;
 }
-/* Hide ALL children (the material icon text) */
-[data-testid="stSidebarCollapsedControl"] * {
-    display: none !important;
+/* Hide the material icon text by making it transparent and zero size */
+[data-testid="stSidebarCollapsedControl"] span {
+    font-size: 0 !important;
+    color: transparent !important;
 }
-/* Show hamburger via pseudo-element */
-[data-testid="stSidebarCollapsedControl"]::before {
+[data-testid="stSidebarCollapsedControl"] button {
+    font-size: 0 !important;
+    color: transparent !important;
+}
+/* Replace with ☰ using pseudo on the inner button */
+[data-testid="stSidebarCollapsedControl"] button::after {
     content: "☰" !important;
-    display: block !important;
-    color: #94a3b8 !important;
     font-size: 16px !important;
+    color: #94a3b8 !important;
     font-family: Arial, sans-serif !important;
-    line-height: 1 !important;
+    position: absolute !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) !important;
 }
-[data-testid="stSidebarCollapsedControl"]:hover::before {
+[data-testid="stSidebarCollapsedControl"]:hover button::after {
     color: #ffffff !important;
 }
 
