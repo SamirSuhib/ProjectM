@@ -232,18 +232,32 @@ def get_supabase() -> Client:
 # ---------------------------------------------------------------------------
 
 def _run_sql(query: str, params: dict = None):
-    """Execute any SQL via a Postgres function exposed through Supabase RPC."""
-    sb = get_supabase()
-    # Replace :param style with $1,$2 positional and pass as list
+    """Execute any SQL via the run_sql Postgres function through Supabase RPC.
+    Safely inlines :param values directly into the SQL string before sending.
+    """
     import re
-    ordered_params = []
-    def replacer(m):
-        key = m.group(1)
-        ordered_params.append(params[key] if params and key in params else None)
-        return f"${len(ordered_params)}"
-    sql = re.sub(r":([a-zA-Z_][a-zA-Z0-9_]*)", replacer, query)
-    result = sb.rpc("run_sql", {"query": sql, "params": ordered_params}).execute()
-    return result.data  # list of dicts
+    sb = get_supabase()
+
+    if params:
+        def replacer(m):
+            key = m.group(1)
+            if key not in params:
+                return m.group(0)
+            val = params[key]
+            if val is None:
+                return "NULL"
+            if isinstance(val, bool):
+                return "TRUE" if val else "FALSE"
+            if isinstance(val, (int, float)):
+                return str(val)
+            escaped = str(val).replace("'", "''")
+            return f"\'{escaped}\'"
+        sql = re.sub(r":([a-zA-Z_][a-zA-Z0-9_]*)", replacer, query)
+    else:
+        sql = query
+
+    result = sb.rpc("run_sql", {"query": sql}).execute()
+    return result.data
 
 def fetch_df(q: str, p: dict = None) -> pd.DataFrame:
     """Run SELECT query, return DataFrame."""
