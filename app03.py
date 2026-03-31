@@ -179,7 +179,6 @@ def login_page():
             else:
                 st.error("Invalid username or password.")
 
-
 if not st.session_state.get("authenticated"):
     login_page()
     st.stop()
@@ -695,29 +694,34 @@ st.markdown("""
     background: #1e293b !important;
     border: 1px solid #334155 !important;
     border-radius: 50% !important;
-    width: 32px !important;
-    height: 32px !important;
+    width: 36px !important;
+    height: 36px !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
-    top: 50% !important;
     box-shadow: 0 2px 8px rgba(0,0,0,0.4) !important;
     transition: all 0.2s !important;
+    overflow: hidden !important;
+    position: relative !important;
 }
 [data-testid="stSidebarCollapsedControl"]:hover {
     background: #22c55e !important;
     border-color: #22c55e !important;
 }
-[data-testid="stSidebarCollapsedControl"] svg {
+/* Hide ALL children (the material icon text) */
+[data-testid="stSidebarCollapsedControl"] * {
     display: none !important;
 }
-[data-testid="stSidebarCollapsedControl"]::after {
+/* Show hamburger via pseudo-element */
+[data-testid="stSidebarCollapsedControl"]::before {
     content: "☰" !important;
+    display: block !important;
     color: #94a3b8 !important;
-    font-size: 14px !important;
+    font-size: 16px !important;
+    font-family: Arial, sans-serif !important;
     line-height: 1 !important;
 }
-[data-testid="stSidebarCollapsedControl"]:hover::after {
+[data-testid="stSidebarCollapsedControl"]:hover::before {
     color: #ffffff !important;
 }
 
@@ -1207,8 +1211,9 @@ with tab2:
             LEFT JOIN manure_types mt ON mt.manure_type_id=b.planned_manure_type_id
             WHERE b.status='booked' ORDER BY b.delivery_date, b.time_slot
         """)
-        # keep booking_id as numeric column for the selectbox
+        # keep booking_id as numeric column for the selectbox (hidden from display)
         ob["booking_id"] = ob["ID"]
+        ob_display = ob.drop(columns=["booking_id"])
         mtd = fetch_df("SELECT manure_type_id,name FROM manure_types ORDER BY name")
     except Exception as e:
         st.error(f"DB error: {e}"); ob = pd.DataFrame(); mtd = pd.DataFrame()
@@ -1216,7 +1221,7 @@ with tab2:
     if ob.empty:
         st.info("📭 No open bookings.")
     else:
-        st.dataframe(ob, use_container_width=True, hide_index=True)
+        st.dataframe(ob_display, use_container_width=True, hide_index=True)
         mm2 = dict(zip(mtd["name"], mtd["manure_type_id"]))
         bids= ob["booking_id"].tolist()
         st.markdown("#### ✅ Record a Delivery")
