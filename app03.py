@@ -6,8 +6,7 @@ import matplotlib.pyplot as plt
 import hashlib, io, os
 from datetime import date, timedelta
 from typing import Optional
-from sqlalchemy import create_engine, text
-from sqlalchemy.pool import NullPool
+from supabase import create_client, Client
 
 # =============================================================================
 # DB SCHEMA MIGRATION (run once):
@@ -214,44 +213,68 @@ TIME_SLOTS = [
 ]
 
 # =============================================================================
-# DATABASE
+# DATABASE  (Supabase REST client — works on Streamlit Cloud, no port 5432)
 # =============================================================================
-def _get_database_url() -> str:
-    """Read DATABASE_URL from st.secrets, env var, or local default."""
-    try:
-        if hasattr(st, "secrets"):
-            # Try [database] url first
-            if "database" in st.secrets and "url" in st.secrets["database"]:
-                return st.secrets["database"]["url"]
-            # Then try top-level DATABASE_URL
-            if "DATABASE_URL" in st.secrets:
-                return st.secrets["DATABASE_URL"]
-    except Exception:
-        pass
-    # Fall back to environment variable or local default
-    return os.getenv(
-        "DATABASE_URL",
-        "postgresql+psycopg2://postgres:12345@localhost:5432/biomethane_db"
-    )
-
-DATABASE_URL = _get_database_url()
-
 @st.cache_resource
-def get_engine():
-    return create_engine(DATABASE_URL, poolclass=NullPool, future=True)
+def get_supabase() -> Client:
+    url = st.secrets["supabase"]["url"]
+    key = st.secrets["supabase"]["key"]
+    return create_client(url, key)
 
-def fetch_df(q, p=None):
-    with get_engine().connect() as c:
-        return pd.read_sql_query(text(q), c, params=p or {})
+# ---------------------------------------------------------------------------
+# The three helper functions below keep the same signatures as before so that
+# every other line in the app works without any changes.
+# They call Supabase's PostgREST RPC endpoint which accepts raw SQL via the
+# "pg_query" postgres function — OR we use the supabase-py query builder.
+#
+# Simplest universal approach: use supabase.rpc() with a raw-SQL postgres
+# function. We create that function once in Supabase SQL Editor (see README).
+# ---------------------------------------------------------------------------
 
-def exec_one(q, p=None, fetchone=False):
-    with get_engine().begin() as c:
-        r = c.execute(text(q), p or {})
-        return r.fetchone() if fetchone else None
+def _run_sql(query: str, params: dict = None):
+    """Execute any SQL via a Postgres function exposed through Supabase RPC."""
+    sb = get_supabase()
+    # Replace :param style with $1,$2 positional and pass as list
+    import re
+    ordered_params = []
+    def replacer(m):
+        key = m.group(1)
+        ordered_params.append(params[key] if params and key in params else None)
+        return f"${len(ordered_params)}"
+    sql = re.sub(r":([a-zA-Z_][a-zA-Z0-9_]*)", replacer, query)
+    result = sb.rpc("run_sql", {"query": sql, "params": ordered_params}).execute()
+    return result.data  # list of dicts
 
-def scalar(q, p=None):
-    with get_engine().connect() as c:
-        return c.execute(text(q), p or {}).scalar()
+def fetch_df(q: str, p: dict = None) -> pd.DataFrame:
+    """Run SELECT query, return DataFrame."""
+    try:
+        rows = _run_sql(q, p)
+        if rows:
+            return pd.DataFrame(rows)
+        return pd.DataFrame()
+    except Exception as e:
+        raise RuntimeError(f"DB error: {e}")
+
+def exec_one(q: str, p: dict = None, fetchone: bool = False):
+    """Run INSERT / UPDATE / DELETE (optionally return first row)."""
+    try:
+        rows = _run_sql(q, p)
+        if fetchone and rows:
+            first = rows[0]
+            return tuple(first.values())
+        return None
+    except Exception as e:
+        raise RuntimeError(f"DB error: {e}")
+
+def scalar(q: str, p: dict = None):
+    """Run a query that returns a single value."""
+    try:
+        rows = _run_sql(q, p)
+        if rows:
+            return list(rows[0].values())[0]
+        return None
+    except Exception as e:
+        raise RuntimeError(f"DB error: {e}")
 
 # =============================================================================
 # STORAGE HELPERS — single source of truth, used by all tabs
