@@ -178,9 +178,7 @@ def login_page():
                 st.rerun()
             else:
                 st.error("Invalid username or password.")
-        st.markdown("<p style='text-align:center;color:#475569;font-size:0.75rem;margin-top:16px'>"
-                    "admin / admin123 &nbsp;·&nbsp; operator / plant2024</p>",
-                    unsafe_allow_html=True)
+       
 
 if not st.session_state.get("authenticated"):
     login_page()
