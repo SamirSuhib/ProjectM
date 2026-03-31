@@ -178,7 +178,6 @@ def login_page():
                 st.rerun()
             else:
                 st.error("Invalid username or password.")
-       
 
 if not st.session_state.get("authenticated"):
     login_page()
@@ -690,6 +689,37 @@ st.markdown("""
                                 text-transform: uppercase; }
 [data-testid="stSidebar"] hr { border-color: #1e293b !important; margin: 12px 0 !important; }
 
+/* ── Sidebar collapse/expand toggle button ──────────────────────────────── */
+[data-testid="stSidebarCollapsedControl"] {
+    background: #1e293b !important;
+    border: 1px solid #334155 !important;
+    border-radius: 50% !important;
+    width: 32px !important;
+    height: 32px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    top: 50% !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4) !important;
+    transition: all 0.2s !important;
+}
+[data-testid="stSidebarCollapsedControl"]:hover {
+    background: #22c55e !important;
+    border-color: #22c55e !important;
+}
+[data-testid="stSidebarCollapsedControl"] svg {
+    display: none !important;
+}
+[data-testid="stSidebarCollapsedControl"]::after {
+    content: "☰" !important;
+    color: #94a3b8 !important;
+    font-size: 14px !important;
+    line-height: 1 !important;
+}
+[data-testid="stSidebarCollapsedControl"]:hover::after {
+    color: #ffffff !important;
+}
+
 /* ── Sidebar metrics ────────────────────────────────────────────────────── */
 [data-testid="stSidebar"] [data-testid="stMetric"] {
     background: #1e293b !important;
@@ -1167,8 +1197,8 @@ with tab2:
     st.subheader("🚛 Record Delivery or Cancel Booking")
     try:
         ob = fetch_df("""
-            SELECT b.booking_id, f.name AS farmer, b.delivery_date, b.time_slot,
-                   b.expected_tons, b.manure_form,
+            SELECT b.booking_id AS "ID", f.name AS farmer, b.delivery_date,
+                   b.time_slot, b.expected_tons, b.manure_form,
                    COALESCE(b.assigned_truck,'own') AS truck,
                    COALESCE(b.assigned_worker,'—')  AS worker,
                    mt.name AS planned_type, b.status
@@ -1176,6 +1206,8 @@ with tab2:
             LEFT JOIN manure_types mt ON mt.manure_type_id=b.planned_manure_type_id
             WHERE b.status='booked' ORDER BY b.delivery_date, b.time_slot
         """)
+        # keep booking_id as numeric column for the selectbox
+        ob["booking_id"] = ob["ID"]
         mtd = fetch_df("SELECT manure_type_id,name FROM manure_types ORDER BY name")
     except Exception as e:
         st.error(f"DB error: {e}"); ob = pd.DataFrame(); mtd = pd.DataFrame()
