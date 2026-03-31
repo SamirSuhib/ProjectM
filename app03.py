@@ -256,19 +256,12 @@ def _run_sql(query: str, params: dict = None):
     else:
         sql = query
 
+    import re as _re
     query_type = sql.strip().upper()[:6]
     is_write = query_type in ('INSERT', 'UPDATE', 'DELETE')
 
     if is_write:
-        # Strip RETURNING clause — we handle it separately if needed
-        import re as _re
-        has_returning = bool(_re.search(r'\bRETURNING\b', sql, _re.IGNORECASE))
-        if has_returning:
-            # Wrap in a CTE so we can SELECT from it
-            sql_wrapped = f"WITH _w AS ({sql}) SELECT * FROM _w"
-            result = sb.rpc("run_sql", {"query": sql_wrapped}).execute()
-        else:
-            result = sb.rpc("run_sql_write", {"query": sql}).execute()
+        result = sb.rpc("run_sql_write", {"query": sql}).execute()
     else:
         result = sb.rpc("run_sql", {"query": sql}).execute()
     return result.data
