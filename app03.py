@@ -179,7 +179,6 @@ def login_page():
             else:
                 st.error("Invalid username or password.")
 
-
 if not st.session_state.get("authenticated"):
     login_page()
     st.stop()
@@ -937,6 +936,27 @@ hr { border-color: #1e293b !important; margin: 16px 0 !important; }
 # =============================================================================
 # SIDEBAR
 # =============================================================================
+# Inject JS to replace the keyboard_double_arr icon with a hamburger symbol
+st.markdown("""
+<script>
+function fixSidebarButton() {
+    const btns = window.parent.document.querySelectorAll('[data-testid="stSidebarCollapsedControl"] button');
+    btns.forEach(btn => {
+        btn.innerHTML = '&#9776;';
+        btn.style.fontSize = '18px';
+        btn.style.color = '#94a3b8';
+        btn.style.background = 'none';
+        btn.style.border = 'none';
+        btn.style.cursor = 'pointer';
+    });
+}
+// Run on load and watch for DOM changes
+fixSidebarButton();
+const observer = new MutationObserver(fixSidebarButton);
+observer.observe(window.parent.document.body, { childList: true, subtree: true });
+</script>
+""", unsafe_allow_html=True)
+
 with st.sidebar:
     uname = st.session_state.get('username','?')
     role  = st.session_state.get('role','operator')
@@ -1017,6 +1037,32 @@ with hc2:
     except Exception:
         pass
 
+
+# Inject JS to replace the keyboard_double_arr text with ☰
+st.markdown("""
+<script>
+function fixSidebarBtn() {
+    const btns = window.parent.document.querySelectorAll('[data-testid="stSidebarCollapsedControl"] button');
+    btns.forEach(btn => {
+        const spans = btn.querySelectorAll('span');
+        spans.forEach(s => {
+            if (s.innerText && s.innerText.includes('keyboard')) {
+                s.innerText = '☰';
+                s.style.fontSize = '18px';
+                s.style.fontFamily = 'Arial, sans-serif';
+                s.style.color = '#94a3b8';
+            }
+        });
+    });
+}
+// Run on load and observe for changes
+fixSidebarBtn();
+setTimeout(fixSidebarBtn, 500);
+setTimeout(fixSidebarBtn, 1500);
+const observer = new MutationObserver(fixSidebarBtn);
+observer.observe(window.parent.document.body, { childList: true, subtree: true });
+</script>
+""", unsafe_allow_html=True)
 
 tab1,tab2,tab3,tab4,tab5,tab6,tab7,tab8 = st.tabs([
     "📋 Book Slot","🚛 Record Delivery","📆 Daily Schedule","🚚 Truck Calendar",
