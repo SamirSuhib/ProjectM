@@ -3,10 +3,7 @@ import pandas as pd
 import matplotlib.dates as mdates
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import hashlib, io, os
-from datetime import date, timedelta
-from typing import Optional
-from supabase import create_client, Client
+
 
 
 def _hash(pw: str) -> str:
