@@ -178,6 +178,9 @@ def login_page():
                 st.rerun()
             else:
                 st.error("Invalid username or password.")
+        st.markdown("<p style='text-align:center;color:#475569;font-size:0.75rem;margin-top:16px'>"
+                    "admin / admin123 &nbsp;·&nbsp; operator / plant2024</p>",
+                    unsafe_allow_html=True)
 
 if not st.session_state.get("authenticated"):
     login_page()
@@ -673,13 +676,6 @@ st.markdown("""
 }
 [data-testid="stHeader"] { background: transparent !important; }
 
-/* ── Hide Streamlit Cloud toolbar (Manage app) for all users ── */
-[data-testid="stToolbar"],
-[data-testid="stDecoration"],
-#MainMenu,
-.stDeployButton,
-footer { visibility: hidden !important; height: 0 !important; }
-
 /* ── Sidebar ────────────────────────────────────────────────────────────── */
 [data-testid="stSidebar"] {
     background: #0f172a !important;
@@ -697,7 +693,43 @@ footer { visibility: hidden !important; height: 0 !important; }
 [data-testid="stSidebar"] hr { border-color: #1e293b !important; margin: 12px 0 !important; }
 
 /* ── Sidebar collapse/expand toggle button ──────────────────────────────── */
-
+[data-testid="stSidebarCollapsedControl"] {
+    background: #1e293b !important;
+    border: 1px solid #334155 !important;
+    border-radius: 50% !important;
+    width: 36px !important;
+    height: 36px !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4) !important;
+    transition: all 0.2s !important;
+    position: relative !important;
+}
+[data-testid="stSidebarCollapsedControl"]:hover {
+    background: #22c55e !important;
+    border-color: #22c55e !important;
+}
+/* Hide the material icon text by making it transparent and zero size */
+[data-testid="stSidebarCollapsedControl"] span {
+    font-size: 0 !important;
+    color: transparent !important;
+}
+[data-testid="stSidebarCollapsedControl"] button {
+    font-size: 0 !important;
+    color: transparent !important;
+}
+/* Replace with ☰ using pseudo on the inner button */
+[data-testid="stSidebarCollapsedControl"] button::after {
+    content: "☰" !important;
+    font-size: 16px !important;
+    color: #94a3b8 !important;
+    font-family: Arial, sans-serif !important;
+    position: absolute !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) !important;
+}
+[data-testid="stSidebarCollapsedControl"]:hover button::after {
+    color: #ffffff !important;
+}
 
 /* ── Sidebar metrics ────────────────────────────────────────────────────── */
 [data-testid="stSidebar"] [data-testid="stMetric"] {
@@ -907,6 +939,26 @@ hr { border-color: #1e293b !important; margin: 16px 0 !important; }
 # =============================================================================
 # SIDEBAR
 # =============================================================================
+# Inject JS to replace the keyboard_double_arr icon with a hamburger symbol
+st.markdown("""
+<script>
+function fixSidebarButton() {
+    const btns = window.parent.document.querySelectorAll('[data-testid="stSidebarCollapsedControl"] button');
+    btns.forEach(btn => {
+        btn.innerHTML = '&#9776;';
+        btn.style.fontSize = '18px';
+        btn.style.color = '#94a3b8';
+        btn.style.background = 'none';
+        btn.style.border = 'none';
+        btn.style.cursor = 'pointer';
+    });
+}
+// Run on load and watch for DOM changes
+fixSidebarButton();
+const observer = new MutationObserver(fixSidebarButton);
+observer.observe(window.parent.document.body, { childList: true, subtree: true });
+</script>
+""", unsafe_allow_html=True)
 
 with st.sidebar:
     uname = st.session_state.get('username','?')
@@ -960,24 +1012,9 @@ hc1, hc2, hc3 = st.columns([1, 3, 0.3])
 with hc1:
     selected_date = st.date_input('Working date', key='shared_date', label_visibility='collapsed')
     date_str      = selected_date.strftime('%Y-%m-%d')
-    cal_icon = "📅"
-    st.markdown(f"<p style='font-size:.75rem;color:#475569;margin-top:-8px'>{cal_icon} {selected_date.strftime('%A, %d %B %Y')}</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='font-size:.75rem;color:#475569;margin-top:-8px'>\U0001f4c5 {selected_date.strftime('%A, %d %B %Y')}</p>", unsafe_allow_html=True)
 with hc3:
-    st.markdown("""
-    <style>
-    [data-testid="stBaseButton-secondary"][key="global_refresh"],
-    div:has(> [data-testid="stBaseButton-secondary"]) button {
-        background: rgba(34,197,94,0.1) !important;
-        border: 1px solid rgba(34,197,94,0.3) !important;
-        border-radius: 10px !important;
-        color: #22c55e !important;
-        font-size: 1.4rem !important;
-        padding: 4px 12px !important;
-        line-height: 1 !important;
-        transition: all 0.2s !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
     if st.button("🔄", key="global_refresh", help="Refresh all data"):
         _fetch_booked_schedule.clear()
         st.rerun()
@@ -1009,6 +1046,31 @@ with hc2:
         pass
 
 
+# Inject JS to replace the keyboard_double_arr text with ☰
+st.markdown("""
+<script>
+function fixSidebarBtn() {
+    const btns = window.parent.document.querySelectorAll('[data-testid="stSidebarCollapsedControl"] button');
+    btns.forEach(btn => {
+        const spans = btn.querySelectorAll('span');
+        spans.forEach(s => {
+            if (s.innerText && s.innerText.includes('keyboard')) {
+                s.innerText = '☰';
+                s.style.fontSize = '18px';
+                s.style.fontFamily = 'Arial, sans-serif';
+                s.style.color = '#94a3b8';
+            }
+        });
+    });
+}
+// Run on load and observe for changes
+fixSidebarBtn();
+setTimeout(fixSidebarBtn, 500);
+setTimeout(fixSidebarBtn, 1500);
+const observer = new MutationObserver(fixSidebarBtn);
+observer.observe(window.parent.document.body, { childList: true, subtree: true });
+</script>
+""", unsafe_allow_html=True)
 
 tab1,tab2,tab3,tab4,tab5,tab6,tab7,tab8 = st.tabs([
     "📋 Book Slot","🚛 Record Delivery","📆 Daily Schedule","🚚 Truck Calendar",
@@ -1763,9 +1825,6 @@ with tab7:
 
 # ── TAB 8 — MANAGE FARMERS ───────────────────────────────────────────────────
 with tab8:
-    if st.session_state.get("role") != "admin":
-        st.warning("⛔ Access denied — this section is for administrators only.")
-        st.stop()
     st.subheader("👨‍🌾 Manage Farmers")
     fa,fl=st.tabs(["➕ Add Farmer","📋 Farmer List"])
 
