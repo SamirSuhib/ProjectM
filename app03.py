@@ -179,7 +179,6 @@ def login_page():
             else:
                 st.error("Invalid username or password.")
 
-
 if not st.session_state.get("authenticated"):
     login_page()
     st.stop()
@@ -673,13 +672,6 @@ st.markdown("""
     padding-top: 0 !important;
 }
 [data-testid="stHeader"] { background: transparent !important; }
-
-/* ── Hide Streamlit Cloud toolbar (Manage app) for all users ── */
-[data-testid="stToolbar"],
-[data-testid="stDecoration"],
-#MainMenu,
-.stDeployButton,
-footer { visibility: hidden !important; height: 0 !important; }
 
 /* ── Sidebar ────────────────────────────────────────────────────────────── */
 [data-testid="stSidebar"] {
@@ -1831,9 +1823,6 @@ with tab7:
 
 # ── TAB 8 — MANAGE FARMERS ───────────────────────────────────────────────────
 with tab8:
-    if st.session_state.get("role") != "admin":
-        st.warning("⛔ Access denied — this section is for administrators only.")
-        st.stop()
     st.subheader("👨‍🌾 Manage Farmers")
     fa,fl=st.tabs(["➕ Add Farmer","📋 Farmer List"])
 
