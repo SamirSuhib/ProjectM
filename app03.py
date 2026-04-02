@@ -179,7 +179,6 @@ def login_page():
             else:
                 st.error("Invalid username or password.")
 
-
 if not st.session_state.get("authenticated"):
     login_page()
     st.stop()
@@ -674,20 +673,6 @@ st.markdown("""
 }
 [data-testid="stHeader"] { background: transparent !important; }
 
-/* ── Refresh button ─────────────────────────────────────────────────────── */
-div[data-testid="stButton"]:has(button[kind="secondary"]) button[data-testid="baseButton-secondary"] {
-    background: rgba(34,197,94,0.1) !important;
-    border: 1px solid rgba(34,197,94,0.3) !important;
-    border-radius: 10px !important;
-    color: #22c55e !important;
-    font-size: 0.85rem !important;
-    font-weight: 600 !important;
-    padding: 5px 14px !important;
-    letter-spacing: 0.02em !important;
-    transition: all 0.2s !important;
-    white-space: nowrap !important;
-}
-
 /* ── Hide Streamlit Cloud toolbar (Manage app) for all users ── */
 [data-testid="stToolbar"],
 [data-testid="stDecoration"],
@@ -712,42 +697,25 @@ footer { visibility: hidden !important; height: 0 !important; }
 [data-testid="stSidebar"] hr { border-color: #1e293b !important; margin: 12px 0 !important; }
 
 /* ── Sidebar collapse/expand toggle button ──────────────────────────────── */
+/* ── Sidebar toggle — keep default arrow, just style the container ── */
 [data-testid="stSidebarCollapsedControl"] {
     background: #1e293b !important;
     border: 1px solid #334155 !important;
     border-radius: 50% !important;
-    width: 36px !important;
-    height: 36px !important;
     box-shadow: 0 2px 8px rgba(0,0,0,0.4) !important;
     transition: all 0.2s !important;
-    position: relative !important;
 }
 [data-testid="stSidebarCollapsedControl"]:hover {
     background: #22c55e !important;
     border-color: #22c55e !important;
 }
-/* Hide the material icon text by making it transparent and zero size */
-[data-testid="stSidebarCollapsedControl"] span {
-    font-size: 0 !important;
-    color: transparent !important;
+[data-testid="stSidebarCollapsedControl"] svg {
+    fill: #94a3b8 !important;
+    width: 20px !important;
+    height: 20px !important;
 }
-[data-testid="stSidebarCollapsedControl"] button {
-    font-size: 0 !important;
-    color: transparent !important;
-}
-/* Replace with ☰ using pseudo on the inner button */
-[data-testid="stSidebarCollapsedControl"] button::after {
-    content: "☰" !important;
-    font-size: 16px !important;
-    color: #94a3b8 !important;
-    font-family: Arial, sans-serif !important;
-    position: absolute !important;
-    top: 50% !important;
-    left: 50% !important;
-    transform: translate(-50%, -50%) !important;
-}
-[data-testid="stSidebarCollapsedControl"]:hover button::after {
-    color: #ffffff !important;
+[data-testid="stSidebarCollapsedControl"]:hover svg {
+    fill: #ffffff !important;
 }
 
 /* ── Sidebar metrics ────────────────────────────────────────────────────── */
@@ -1036,33 +1004,20 @@ with hc1:
 with hc3:
     st.markdown("""
     <style>
-    div[data-testid="column"]:last-child {
-        display: flex;
-        align-items: center;
-        justify-content: flex-end;
-    }
-    button[kind="secondary"][data-testid="baseButton-secondary"]:has(p:contains("🔄")),
-    #global_refresh_btn button {
-        background: rgba(34,197,94,0.12) !important;
-        border: 1px solid rgba(34,197,94,0.35) !important;
+    [data-testid="stBaseButton-secondary"][key="global_refresh"],
+    div:has(> [data-testid="stBaseButton-secondary"]) button {
+        background: rgba(34,197,94,0.1) !important;
+        border: 1px solid rgba(34,197,94,0.3) !important;
         border-radius: 10px !important;
         color: #22c55e !important;
-        font-size: 1rem !important;
-        padding: 6px 14px !important;
-        height: 36px !important;
-        min-width: 80px !important;
+        font-size: 1.4rem !important;
+        padding: 4px 12px !important;
+        line-height: 1 !important;
         transition: all 0.2s !important;
     }
-    #global_refresh_btn button:hover {
-        background: rgba(34,197,94,0.25) !important;
-        border-color: #22c55e !important;
-        box-shadow: 0 0 10px rgba(34,197,94,0.3) !important;
-    }
     </style>
-    <div id="global_refresh_btn" style="display:flex;justify-content:flex-end;align-items:center;height:100%;padding-top:2px;">
-    </div>
     """, unsafe_allow_html=True)
-    if st.button("🔄 Refresh", key="global_refresh", help="Clear cache and reload all data"):
+    if st.button("🔄", key="global_refresh", help="Refresh all data"):
         _fetch_booked_schedule.clear()
         st.rerun()
 with hc2:
