@@ -697,26 +697,7 @@ footer { visibility: hidden !important; height: 0 !important; }
 [data-testid="stSidebar"] hr { border-color: #1e293b !important; margin: 12px 0 !important; }
 
 /* ── Sidebar collapse/expand toggle button ──────────────────────────────── */
-/* ── Sidebar toggle — keep default arrow, just style the container ── */
-[data-testid="stSidebarCollapsedControl"] {
-    background: #1e293b !important;
-    border: 1px solid #334155 !important;
-    border-radius: 50% !important;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.4) !important;
-    transition: all 0.2s !important;
-}
-[data-testid="stSidebarCollapsedControl"]:hover {
-    background: #22c55e !important;
-    border-color: #22c55e !important;
-}
-[data-testid="stSidebarCollapsedControl"] svg {
-    fill: #94a3b8 !important;
-    width: 20px !important;
-    height: 20px !important;
-}
-[data-testid="stSidebarCollapsedControl"]:hover svg {
-    fill: #ffffff !important;
-}
+
 
 /* ── Sidebar metrics ────────────────────────────────────────────────────── */
 [data-testid="stSidebar"] [data-testid="stMetric"] {
@@ -926,26 +907,6 @@ hr { border-color: #1e293b !important; margin: 16px 0 !important; }
 # =============================================================================
 # SIDEBAR
 # =============================================================================
-# Inject JS to replace the keyboard_double_arr icon with a hamburger symbol
-st.markdown("""
-<script>
-function fixSidebarButton() {
-    const btns = window.parent.document.querySelectorAll('[data-testid="stSidebarCollapsedControl"] button');
-    btns.forEach(btn => {
-        btn.innerHTML = '&#9776;';
-        btn.style.fontSize = '18px';
-        btn.style.color = '#94a3b8';
-        btn.style.background = 'none';
-        btn.style.border = 'none';
-        btn.style.cursor = 'pointer';
-    });
-}
-// Run on load and watch for DOM changes
-fixSidebarButton();
-const observer = new MutationObserver(fixSidebarButton);
-observer.observe(window.parent.document.body, { childList: true, subtree: true });
-</script>
-""", unsafe_allow_html=True)
 
 with st.sidebar:
     uname = st.session_state.get('username','?')
@@ -1048,31 +1009,6 @@ with hc2:
         pass
 
 
-# Inject JS to replace the keyboard_double_arr text with ☰
-st.markdown("""
-<script>
-function fixSidebarBtn() {
-    const btns = window.parent.document.querySelectorAll('[data-testid="stSidebarCollapsedControl"] button');
-    btns.forEach(btn => {
-        const spans = btn.querySelectorAll('span');
-        spans.forEach(s => {
-            if (s.innerText && s.innerText.includes('keyboard')) {
-                s.innerText = '☰';
-                s.style.fontSize = '18px';
-                s.style.fontFamily = 'Arial, sans-serif';
-                s.style.color = '#94a3b8';
-            }
-        });
-    });
-}
-// Run on load and observe for changes
-fixSidebarBtn();
-setTimeout(fixSidebarBtn, 500);
-setTimeout(fixSidebarBtn, 1500);
-const observer = new MutationObserver(fixSidebarBtn);
-observer.observe(window.parent.document.body, { childList: true, subtree: true });
-</script>
-""", unsafe_allow_html=True)
 
 tab1,tab2,tab3,tab4,tab5,tab6,tab7,tab8 = st.tabs([
     "📋 Book Slot","🚛 Record Delivery","📆 Daily Schedule","🚚 Truck Calendar",
