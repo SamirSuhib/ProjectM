@@ -179,6 +179,7 @@ def login_page():
             else:
                 st.error("Invalid username or password.")
 
+
 if not st.session_state.get("authenticated"):
     login_page()
     st.stop()
@@ -673,6 +674,27 @@ st.markdown("""
 }
 [data-testid="stHeader"] { background: transparent !important; }
 
+/* ── Refresh button ─────────────────────────────────────────────────────── */
+div[data-testid="stButton"]:has(button[kind="secondary"]) button[data-testid="baseButton-secondary"] {
+    background: rgba(34,197,94,0.1) !important;
+    border: 1px solid rgba(34,197,94,0.3) !important;
+    border-radius: 10px !important;
+    color: #22c55e !important;
+    font-size: 0.85rem !important;
+    font-weight: 600 !important;
+    padding: 5px 14px !important;
+    letter-spacing: 0.02em !important;
+    transition: all 0.2s !important;
+    white-space: nowrap !important;
+}
+
+/* ── Hide Streamlit Cloud toolbar (Manage app) for all users ── */
+[data-testid="stToolbar"],
+[data-testid="stDecoration"],
+#MainMenu,
+.stDeployButton,
+footer { visibility: hidden !important; height: 0 !important; }
+
 /* ── Sidebar ────────────────────────────────────────────────────────────── */
 [data-testid="stSidebar"] {
     background: #0f172a !important;
@@ -1012,8 +1034,35 @@ with hc1:
     cal_icon = "📅"
     st.markdown(f"<p style='font-size:.75rem;color:#475569;margin-top:-8px'>{cal_icon} {selected_date.strftime('%A, %d %B %Y')}</p>", unsafe_allow_html=True)
 with hc3:
-    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-    if st.button("🔄", key="global_refresh", help="Refresh all data"):
+    st.markdown("""
+    <style>
+    div[data-testid="column"]:last-child {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+    }
+    button[kind="secondary"][data-testid="baseButton-secondary"]:has(p:contains("🔄")),
+    #global_refresh_btn button {
+        background: rgba(34,197,94,0.12) !important;
+        border: 1px solid rgba(34,197,94,0.35) !important;
+        border-radius: 10px !important;
+        color: #22c55e !important;
+        font-size: 1rem !important;
+        padding: 6px 14px !important;
+        height: 36px !important;
+        min-width: 80px !important;
+        transition: all 0.2s !important;
+    }
+    #global_refresh_btn button:hover {
+        background: rgba(34,197,94,0.25) !important;
+        border-color: #22c55e !important;
+        box-shadow: 0 0 10px rgba(34,197,94,0.3) !important;
+    }
+    </style>
+    <div id="global_refresh_btn" style="display:flex;justify-content:flex-end;align-items:center;height:100%;padding-top:2px;">
+    </div>
+    """, unsafe_allow_html=True)
+    if st.button("🔄 Refresh", key="global_refresh", help="Clear cache and reload all data"):
         _fetch_booked_schedule.clear()
         st.rerun()
 with hc2:
@@ -1823,6 +1872,9 @@ with tab7:
 
 # ── TAB 8 — MANAGE FARMERS ───────────────────────────────────────────────────
 with tab8:
+    if st.session_state.get("role") != "admin":
+        st.warning("⛔ Access denied — this section is for administrators only.")
+        st.stop()
     st.subheader("👨‍🌾 Manage Farmers")
     fa,fl=st.tabs(["➕ Add Farmer","📋 Farmer List"])
 
