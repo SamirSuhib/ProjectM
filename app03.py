@@ -1180,20 +1180,21 @@ with tab3:
         status_in   = "','".join(show_statuses)
         safe_date   = date_str.replace("'", "")   # date_str is always YYYY-MM-DD, safe
         try:
-             sc = fetch_df("""
-            SELECT b.booking_id, f.name AS farmer,
-                   b.manure_form, mt.name AS type,
-                   b.expected_tons, COALESCE(d.quantity_tons,0) AS actual,
-                   b.time_slot, COALESCE(b.trips_count,1)       AS trips,
-                   COALESCE(b.assigned_truck,'own')             AS truck,
-                   COALESCE(b.assigned_worker,'—')              AS worker,
-                   COALESCE(b.transport_required,FALSE)         AS transport,
-                   b.status
-             FROM bookings b JOIN farmers f ON f.farmer_id=b.farmer_id
-             LEFT JOIN deliveries d ON d.booking_id=b.booking_id
-             LEFT JOIN manure_types mt ON mt.manure_type_id=b.planned_manure_type_id
-             WHERE b.delivery_date=:date ORDER BY b.time_slot
-         """, {"date":date_str})
+            sc = fetch_df(f"""
+                SELECT b.booking_id, b.time_slot, f.name AS farmer,
+                       b.manure_form, mt.name AS type,
+                       b.expected_tons, COALESCE(d.quantity_tons,0) AS actual,
+                       COALESCE(b.transport_required,FALSE)        AS transport,
+                       COALESCE(b.assigned_truck,'own')            AS truck,
+                       COALESCE(b.assigned_worker,'—')             AS worker,
+                       COALESCE(b.trips_count,1)                   AS trips,
+                       b.status
+                FROM bookings b JOIN farmers f ON f.farmer_id=b.farmer_id
+                LEFT JOIN deliveries d ON d.booking_id=b.booking_id
+                LEFT JOIN manure_types mt ON mt.manure_type_id=b.planned_manure_type_id
+                WHERE b.delivery_date='{safe_date}' AND b.status IN ('{status_in}')
+                ORDER BY b.time_slot
+            """)
 
         except Exception as e:
             st.error(f"DB error: {e}"); sc = pd.DataFrame()
