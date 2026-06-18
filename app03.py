@@ -1258,11 +1258,12 @@ with tab2:
     st.subheader("🚛 Record Delivery or Cancel Booking")
     try:
         ob = fetch_df("""
-            SELECT b.booking_id AS "ID", f.name AS farmer, b.delivery_date,
-                   b.time_slot, b.expected_tons, b.manure_form,
+            SELECT b.booking_id AS "ID", f.name AS farmer,
+                   b.delivery_date, b.time_slot,
+                   b.manure_form, mt.name AS planned_type, b.expected_tons,
                    COALESCE(b.assigned_truck,'own') AS truck,
                    COALESCE(b.assigned_worker,'—')  AS worker,
-                   mt.name AS planned_type, b.status
+                   b.status
             FROM bookings b JOIN farmers f ON f.farmer_id=b.farmer_id
             LEFT JOIN manure_types mt ON mt.manure_type_id=b.planned_manure_type_id
             WHERE b.status='booked' ORDER BY b.delivery_date, b.time_slot
