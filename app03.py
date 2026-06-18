@@ -1158,7 +1158,10 @@ with tab3:
     if not show_statuses:
         st.info("Select at least one status to display.")
     else:
-        status_in = "','".join(show_statuses)
+        # Build the IN list and inline the date directly — avoids conflicts
+        # between f-string interpolation and the :param regex replacer in _run_sql.
+        status_in   = "','".join(show_statuses)
+        safe_date   = date_str.replace("'", "")   # date_str is always YYYY-MM-DD, safe
         try:
             sc = fetch_df(f"""
                 SELECT b.booking_id, b.time_slot, f.name AS farmer,
@@ -1172,9 +1175,9 @@ with tab3:
                 FROM bookings b JOIN farmers f ON f.farmer_id=b.farmer_id
                 LEFT JOIN deliveries d ON d.booking_id=b.booking_id
                 LEFT JOIN manure_types mt ON mt.manure_type_id=b.planned_manure_type_id
-                WHERE b.delivery_date=:date AND b.status IN ('{status_in}')
+                WHERE b.delivery_date='{safe_date}' AND b.status IN ('{status_in}')
                 ORDER BY b.time_slot
-            """, {"date":date_str})
+            """)
         except Exception as e:
             st.error(f"DB error: {e}"); sc = pd.DataFrame()
 
