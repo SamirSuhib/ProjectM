@@ -1312,6 +1312,16 @@ with tab5:
                 if "OVERFLOW" in ls or "OVERFLOW" in ss: return ["background-color:#3d1a1a"]*len(row)
                 if "HIGH"     in ls or "HIGH"     in ss: return ["background-color:#2d2a1a"]*len(row)
                 return [""]*len(row)
+        fmt = {
+                "Liquid In (m³)": "{:.0f}",
+                "−Liquid Out (m³)": "{:.0f}",
+                "Liquid Level (m³)": "{:.0f}",
+                "Liquid Fill %": "{:.1f}",
+                "Solid In (t)": "{:.0f}",
+                "−Solid Out (t)": "{:.0f}",
+                "Solid Level (t)": "{:.0f}",
+                "Solid Fill %": "{:.1f}",
+            }
         st.dataframe(fdf.style.apply(hl,axis=1), use_container_width=True, hide_index=True)
 
         fig,(ax1,ax2) = plt.subplots(2,1,figsize=(12,7),sharex=True)
