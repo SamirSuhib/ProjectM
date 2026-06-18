@@ -1270,7 +1270,23 @@ with tab2:
         """)
         # keep booking_id as numeric column for the selectbox (hidden from display)
         ob["booking_id"] = ob["ID"]
-        ob_display = ob.drop(columns=["booking_id"])
+        ob_display = ob[
+                [
+                     "ID",
+                     "farmer",
+                     "manure_form",
+                     "planned_type",
+                     "expected_tons",
+                     "delivery_date",
+                     "time_slot",
+                     "truck",
+                     "worker",
+                     "status"
+                    ]
+                ].rename(columns={
+                "ID": "Booking ID"
+             })
+
         mtd = fetch_df("SELECT manure_type_id,name FROM manure_types ORDER BY name")
     except Exception as e:
         st.error(f"DB error: {e}"); ob = pd.DataFrame(); mtd = pd.DataFrame()
