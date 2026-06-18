@@ -1318,10 +1318,10 @@ with tab5:
         
         for col in [
             "Liquid In (m³)",
-            "Liquid Out (m³)",
+            "-Liquid Out (m³)",
             "Liquid Level (m³)",
             "Solid In (t)",
-            "Solid Out (t)",
+            "-Solid Out (t)",
             "Solid Level (t)"
         ]:
             fdf_display[col] = fdf_display[col].round(0)
