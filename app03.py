@@ -330,6 +330,51 @@ def _fetch_booked_schedule() -> dict:
         return {}
 
 
+# =============================================================================
+# FIX (storage simulation correctness)
+# -----------------------------------------------------------------------------
+# The previous implementation computed:
+#     level = initial + total_inflow_so_far - (outflow_per_day * days_elapsed)
+# This is a closed-form shortcut that is only valid if the tank is allowed to
+# go negative on days with no inflow. Because nothing clamped the level at 0,
+# a long run of "no deliveries" days built up a large negative balance, and a
+# single oversized delivery placed far enough in the future could "absorb"
+# that negative balance and come out looking like it was well under capacity
+# — even though the tank would have physically overflowed the moment that
+# delivery actually arrived.
+#
+# The fix below replaces the closed-form formula with a true day-by-day
+# running simulation that floors the level at 0 every day (a tank that is
+# empty cannot emit more outflow than it has — that outflow capacity is
+# simply lost, not carried forward as a debt). This is what _build_level_series
+# does, and _level_on_date / storage_ok / any_future_overflow now use it.
+# =============================================================================
+
+def _build_level_series(form: str, schedule: dict, horizon_end: date,
+                         extra_date: str = None, extra_qty: float = 0.0) -> dict:
+    """
+    True day-by-day running simulation from today through horizon_end (inclusive).
+    Floors the level at 0 each day so outflow can never be "pre-credited"
+    against inflow that hasn't happened yet. Returns {date_str: level}.
+    """
+    today   = date.today()
+    outflow = DAILY_LIQUID_OUTFLOW_M3 if form == "liquid" else DAILY_SOLID_OUTFLOW_TONS
+    level   = LIQUID_INITIAL_STOCK_M3  if form == "liquid" else SOLID_INITIAL_STOCK_TONS
+
+    levels = {}
+    cur = today
+    while cur <= horizon_end:
+        d_str  = cur.strftime("%Y-%m-%d")
+        inflow = schedule.get((d_str, form), 0.0)
+        if extra_date and d_str == extra_date:
+            inflow += extra_qty
+        level = level + inflow - outflow
+        level = max(0.0, level)   # tank cannot go negative
+        levels[d_str] = level
+        cur += timedelta(days=1)
+    return levels
+
+
 def _level_on_date(target: date, form: str,
                    schedule: dict,
                    extra_date: str = None, extra_qty: float = 0.0) -> float:
@@ -337,23 +382,17 @@ def _level_on_date(target: date, form: str,
     Pure in-memory calculation of storage level at END of target date.
     schedule = output of _fetch_booked_schedule()
     extra_date / extra_qty = a hypothetical delivery not yet in DB.
+    Now backed by a true running simulation (see _build_level_series) instead
+    of the closed-form initial + total_in - outflow*days, which let oversized
+    far-future deliveries hide behind outflow that hadn't happened yet.
     """
-    today   = date.today()
-    days    = max(0, (target - today).days + 1)
-    outflow = DAILY_LIQUID_OUTFLOW_M3 if form == "liquid" else DAILY_SOLID_OUTFLOW_TONS
-    initial = LIQUID_INITIAL_STOCK_M3  if form == "liquid" else SOLID_INITIAL_STOCK_TONS
-
-    # Sum all booked deliveries from today up to target
-    total_in = 0.0
-    cur = today
-    while cur <= target:
-        d_str = cur.strftime("%Y-%m-%d")
-        total_in += schedule.get((d_str, form), 0.0)
-        if extra_date and d_str == extra_date:
-            total_in += extra_qty
-        cur += timedelta(days=1)
-
-    return initial + total_in - (outflow * days)
+    horizon_end = target
+    if extra_date:
+        extra_d = date.fromisoformat(extra_date)
+        if extra_d > horizon_end:
+            horizon_end = extra_d
+    levels = _build_level_series(form, schedule, horizon_end, extra_date, extra_qty)
+    return levels[target.strftime("%Y-%m-%d")]
 
 
 def storage_ok(target: date, qty: float, form: str,
@@ -370,22 +409,26 @@ def storage_ok(target: date, qty: float, form: str,
     target_ds = target.strftime("%Y-%m-%d")
     today     = date.today()
 
-    before    = _level_on_date(target, form, schedule)
-    available = max(0.0, cap - before)
+    # Baseline level on the target date, WITHOUT this hypothetical booking
+    before_levels = _build_level_series(form, schedule, target)
+    before        = before_levels[target_ds]
+    available     = max(0.0, cap - before)
+
+    # Now scan today → target+60 WITH the extra booking applied on target date
+    horizon_end = target + timedelta(days=60)
+    with_levels = _build_level_series(form, schedule, horizon_end,
+                                       extra_date=target_ds, extra_qty=qty)
 
     first_overflow = None
     worst_level    = -999999.0
-
-    # Check from today forward (includes days before target) to catch pre-existing overflow
-    horizon_end = target + timedelta(days=60)
     cur = today
     while cur <= horizon_end:
-        lv = _level_on_date(cur, form, schedule,
-                            extra_date=target_ds, extra_qty=qty)
+        d_str = cur.strftime("%Y-%m-%d")
+        lv    = with_levels[d_str]
         if lv > worst_level:
             worst_level = lv
         if lv > cap and first_overflow is None:
-            first_overflow = cur.strftime("%Y-%m-%d")
+            first_overflow = d_str
         cur += timedelta(days=1)
 
     return (first_overflow is None, worst_level, available, first_overflow)
@@ -398,11 +441,14 @@ def any_future_overflow(form: str, horizon: int = 60,
         schedule = _fetch_booked_schedule()
     cap   = LIQUID_STORAGE_CAPACITY_M3 if form == "liquid" else SOLID_STORAGE_CAPACITY_TONS
     today = date.today()
+    horizon_end = today + timedelta(days=horizon)
+    levels = _build_level_series(form, schedule, horizon_end)
     for i in range(horizon):
-        d  = today + timedelta(days=i)
-        lv = _level_on_date(d, form, schedule)
+        d     = today + timedelta(days=i)
+        d_str = d.strftime("%Y-%m-%d")
+        lv    = levels[d_str]
         if lv > cap:
-            return (True, d.strftime("%Y-%m-%d"), lv)
+            return (True, d_str, lv)
     return (False, None, 0.0)
 
 
@@ -1258,35 +1304,18 @@ with tab2:
     st.subheader("🚛 Record Delivery or Cancel Booking")
     try:
         ob = fetch_df("""
-            SELECT b.booking_id AS "ID", f.name AS farmer,
-                   b.delivery_date, b.time_slot,
-                   b.manure_form, mt.name AS planned_type, b.expected_tons,
+            SELECT b.booking_id AS "ID", f.name AS farmer, b.delivery_date,
+                   b.time_slot, b.expected_tons, b.manure_form,
                    COALESCE(b.assigned_truck,'own') AS truck,
                    COALESCE(b.assigned_worker,'—')  AS worker,
-                   b.status
+                   mt.name AS planned_type, b.status
             FROM bookings b JOIN farmers f ON f.farmer_id=b.farmer_id
             LEFT JOIN manure_types mt ON mt.manure_type_id=b.planned_manure_type_id
             WHERE b.status='booked' ORDER BY b.delivery_date, b.time_slot
         """)
         # keep booking_id as numeric column for the selectbox (hidden from display)
         ob["booking_id"] = ob["ID"]
-        ob_display = ob[
-                [
-                     "ID",
-                     "farmer",
-                     "manure_form",
-                     "planned_type",
-                     "expected_tons",
-                     "delivery_date",
-                     "time_slot",
-                     "truck",
-                     "worker",
-                     "status"
-                    ]
-                ].rename(columns={
-                "ID": "Booking ID"
-             })
-
+        ob_display = ob.drop(columns=["booking_id"])
         mtd = fetch_df("SELECT manure_type_id,name FROM manure_types ORDER BY name")
     except Exception as e:
         st.error(f"DB error: {e}"); ob = pd.DataFrame(); mtd = pd.DataFrame()
@@ -1327,42 +1356,25 @@ with tab3:
     st.subheader(f"📆 Daily Schedule — {date_str}")
     try:
         sc = fetch_df("""
-            SELECT b.booking_id, f.name AS farmer,
+            SELECT b.booking_id, b.time_slot, f.name AS farmer,
                    b.manure_form, mt.name AS type,
                    b.expected_tons, COALESCE(d.quantity_tons,0) AS actual,
-                   b.time_slot, COALESCE(b.trips_count,1)       AS trips,
-                   COALESCE(b.assigned_truck,'own')             AS truck,
-                   COALESCE(b.assigned_worker,'—')              AS worker,
-                   COALESCE(b.transport_required,FALSE)         AS transport,
+                   COALESCE(b.transport_required,FALSE)        AS transport,
+                   COALESCE(b.assigned_truck,'own')            AS truck,
+                   COALESCE(b.assigned_worker,'—')             AS worker,
+                   COALESCE(b.trips_count,1)                   AS trips,
                    b.status
-             FROM bookings b JOIN farmers f ON f.farmer_id=b.farmer_id
-             LEFT JOIN deliveries d ON d.booking_id=b.booking_id
-             LEFT JOIN manure_types mt ON mt.manure_type_id=b.planned_manure_type_id
-             WHERE b.delivery_date=:date ORDER BY b.time_slot
-         """, {"date":date_str})
+            FROM bookings b JOIN farmers f ON f.farmer_id=b.farmer_id
+            LEFT JOIN deliveries d ON d.booking_id=b.booking_id
+            LEFT JOIN manure_types mt ON mt.manure_type_id=b.planned_manure_type_id
+            WHERE b.delivery_date=:date ORDER BY b.time_slot
+        """, {"date":date_str})
     except Exception as e:
         st.error(f"DB error: {e}"); sc = pd.DataFrame()
 
     if sc.empty:
         st.info(f"📭 No bookings for {date_str}.")
     else:
-        # Force column order
-        sc = sc[
-            [
-                "booking_id",
-                "farmer",
-                "manure_form",
-                "type",
-                "expected_tons",
-                "actual",
-                "time_slot",
-                "trips",
-                "truck",
-                "worker",
-                "transport",
-                "status",
-             ]
-        ]
         st.dataframe(sc, use_container_width=True, hide_index=True)
         liq = sc[sc["manure_form"]=="liquid"]["expected_tons"].sum()
         sol = sc[sc["manure_form"]=="solid"]["expected_tons"].sum()
@@ -1373,7 +1385,7 @@ with tab3:
         m4.metric("Own transport", sc[sc["transport"]==False].shape[0])
     st.download_button("⬇️ CSV", data=sc.to_csv(index=False).encode() if not sc.empty else b"",
                        file_name=f"schedule_{date_str}.csv", mime="text/csv", key="dl_s3")
-  
+
 # ── TAB 4 — TRUCK CALENDAR ───────────────────────────────────────────────────
 with tab4:
     st.subheader(f"🚚 Truck Calendar — {date_str}")
