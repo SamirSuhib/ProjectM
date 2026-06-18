@@ -50,18 +50,6 @@ from supabase import create_client, Client
 
 # =============================================================================
 # AUTHENTICATION
-# Set credentials via env vars or .streamlit/secrets.toml:
-#   ADMIN_USERNAME / ADMIN_PASSWORD_HASH   (sha256 hex)
-#   OPERATOR_USERNAME / OPERATOR_PASSWORD_HASH
-#
-# secrets.toml example:
-#   [auth]
-#   admin_user    = "admin"
-#   admin_hash    = "<sha256 of password>"
-#   operator_user = "operator"
-#   operator_hash = "<sha256 of password>"
-#
-# Get hash: python3 -c "import hashlib; print(hashlib.sha256(b'yourpassword').hexdigest())"
 # =============================================================================
 
 def _hash(pw: str) -> str:
@@ -77,7 +65,7 @@ def _get_users() -> dict:
             if s.get("operator_user"):
                 users[s["operator_user"]] = (s.get("operator_hash",""), "operator")
     except Exception:
-        pass  # No secrets.toml — fall through to env vars / defaults
+        pass
     au = os.getenv("ADMIN_USERNAME",         "admin")
     ah = os.getenv("ADMIN_PASSWORD_HASH",    _hash("admin123"))
     ou = os.getenv("OPERATOR_USERNAME",      "operator")
@@ -92,13 +80,11 @@ def login_page():
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
     * { font-family: 'Inter', sans-serif !important; }
-
     [data-testid="stAppViewContainer"] {
         background: linear-gradient(135deg, #0a1628 0%, #0d2137 50%, #0a1f1a 100%);
         min-height: 100vh;
     }
     [data-testid="stMain"] { background: transparent !important; }
-
     .login-card {
         background: rgba(255,255,255,0.04);
         backdrop-filter: blur(20px);
@@ -107,47 +93,26 @@ def login_page():
         padding: 48px 40px;
         box-shadow: 0 25px 60px rgba(0,0,0,0.5);
     }
-    .login-logo {
-        display: flex; align-items: center; gap: 12px;
-        margin-bottom: 8px;
-    }
+    .login-logo { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
     .login-logo-icon {
         width: 48px; height: 48px; border-radius: 12px;
         background: linear-gradient(135deg, #22c55e, #16a34a);
-        display: flex; align-items: center; justify-content: center;
-        font-size: 24px;
+        display: flex; align-items: center; justify-content: center; font-size: 24px;
     }
     .login-title   { font-size: 1.8rem; font-weight: 700; color: #f0fdf4; margin: 0; }
     .login-sub     { font-size: 0.85rem; color: #64748b; margin-bottom: 32px; }
     .login-heading { font-size: 1rem; font-weight: 600; color: #94a3b8; margin-bottom: 20px; }
-
     [data-testid="stTextInput"] > div > div > input {
         background: rgba(255,255,255,0.06) !important;
         border: 1px solid rgba(255,255,255,0.12) !important;
         border-radius: 10px !important;
-        color: #f1f5f9 !important;
-        font-size: 0.9rem !important;
-        padding: 12px 16px !important;
-        transition: border-color 0.2s;
-    }
-    [data-testid="stTextInput"] > div > div > input:focus {
-        border-color: #22c55e !important;
-        box-shadow: 0 0 0 3px rgba(34,197,94,0.15) !important;
+        color: #f1f5f9 !important; font-size: 0.9rem !important; padding: 12px 16px !important;
     }
     label { color: #94a3b8 !important; font-size: 0.82rem !important; font-weight: 500 !important; }
-
     [data-testid="baseButton-primary"] {
         background: linear-gradient(135deg, #16a34a, #15803d) !important;
         border: none !important; border-radius: 10px !important;
-        color: #ffffff !important; font-weight: 600 !important;
-        font-size: 0.9rem !important; padding: 12px !important;
-        box-shadow: 0 4px 15px rgba(22,163,74,0.4) !important;
-        transition: all 0.2s !important;
-    }
-    [data-testid="baseButton-primary"]:hover {
-        background: linear-gradient(135deg, #22c55e, #16a34a) !important;
-        box-shadow: 0 6px 20px rgba(22,163,74,0.5) !important;
-        transform: translateY(-1px) !important;
+        color: #ffffff !important; font-weight: 600 !important; font-size: 0.9rem !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -197,7 +162,7 @@ LIQUID_STORAGE_CAPACITY_M3  = 1900
 DAILY_LIQUID_OUTFLOW_M3     = 200
 LIQUID_INITIAL_STOCK_M3     = 500
 SOLID_STORAGE_CAPACITY_TONS = 2000
-DAILY_SOLID_OUTFLOW_TONS    = 200   # adjustable in sidebar
+DAILY_SOLID_OUTFLOW_TONS    = 200
 SOLID_INITIAL_STOCK_TONS    = 0
 LIQUID_TRUCK_CAPACITY_M3    = 27
 SOLID_TRUCK_CAPACITY_TONS   = 27
@@ -211,7 +176,7 @@ TIME_SLOTS = [
 ]
 
 # =============================================================================
-# DATABASE  (Supabase REST client — works on Streamlit Cloud, no port 5432)
+# DATABASE
 # =============================================================================
 @st.cache_resource
 def get_supabase() -> Client:
@@ -219,23 +184,9 @@ def get_supabase() -> Client:
     key = st.secrets["supabase"]["key"]
     return create_client(url, key)
 
-# ---------------------------------------------------------------------------
-# The three helper functions below keep the same signatures as before so that
-# every other line in the app works without any changes.
-# They call Supabase's PostgREST RPC endpoint which accepts raw SQL via the
-# "pg_query" postgres function — OR we use the supabase-py query builder.
-#
-# Simplest universal approach: use supabase.rpc() with a raw-SQL postgres
-# function. We create that function once in Supabase SQL Editor (see README).
-# ---------------------------------------------------------------------------
-
 def _run_sql(query: str, params: dict = None):
-    """Execute any SQL via the run_sql Postgres function through Supabase RPC.
-    Safely inlines :param values directly into the SQL string before sending.
-    """
     import re
     sb = get_supabase()
-
     if params:
         def replacer(m):
             key = m.group(1)
@@ -254,7 +205,6 @@ def _run_sql(query: str, params: dict = None):
     else:
         sql = query
 
-    import re as _re
     query_type = sql.strip().upper()[:6]
     is_write = query_type in ('INSERT', 'UPDATE', 'DELETE')
 
@@ -265,7 +215,6 @@ def _run_sql(query: str, params: dict = None):
     return result.data
 
 def fetch_df(q: str, p: dict = None) -> pd.DataFrame:
-    """Run SELECT query, return DataFrame."""
     try:
         rows = _run_sql(q, p)
         if rows:
@@ -275,11 +224,9 @@ def fetch_df(q: str, p: dict = None) -> pd.DataFrame:
         raise RuntimeError(f"DB error: {e}")
 
 def exec_one(q: str, p: dict = None, fetchone: bool = False):
-    """Run INSERT / UPDATE / DELETE (optionally return first row)."""
     try:
         rows = _run_sql(q, p)
         if fetchone:
-            # rows may be a list of dicts, a single dict, or wrapped jsonb
             if isinstance(rows, list) and len(rows) > 0:
                 first = rows[0]
                 if isinstance(first, dict):
@@ -291,7 +238,6 @@ def exec_one(q: str, p: dict = None, fetchone: bool = False):
         raise RuntimeError(f"DB error: {e}")
 
 def scalar(q: str, p: dict = None):
-    """Run a query that returns a single value."""
     try:
         rows = _run_sql(q, p)
         if rows:
@@ -301,14 +247,10 @@ def scalar(q: str, p: dict = None):
         raise RuntimeError(f"DB error: {e}")
 
 # =============================================================================
-# STORAGE HELPERS — single source of truth, used by all tabs
+# STORAGE HELPERS
 # =============================================================================
 
-# =============================================================================
-# STORAGE HELPERS — single DB fetch, all calculations in memory
-# =============================================================================
-
-@st.cache_data(ttl=30)  # cache for 30 seconds — refreshes after any booking change
+@st.cache_data(ttl=30)
 def _fetch_booked_schedule() -> dict:
     """
     Fetch ALL booked deliveries in one query, return as dict:
@@ -331,45 +273,45 @@ def _fetch_booked_schedule() -> dict:
 
 
 # =============================================================================
-# FIX (storage simulation correctness)
-# -----------------------------------------------------------------------------
-# The previous implementation computed:
-#     level = initial + total_inflow_so_far - (outflow_per_day * days_elapsed)
-# This is a closed-form shortcut that is only valid if the tank is allowed to
-# go negative on days with no inflow. Because nothing clamped the level at 0,
-# a long run of "no deliveries" days built up a large negative balance, and a
-# single oversized delivery placed far enough in the future could "absorb"
-# that negative balance and come out looking like it was well under capacity
-# — even though the tank would have physically overflowed the moment that
-# delivery actually arrived.
-#
-# The fix below replaces the closed-form formula with a true day-by-day
-# running simulation that floors the level at 0 every day (a tank that is
-# empty cannot emit more outflow than it has — that outflow capacity is
-# simply lost, not carried forward as a debt). This is what _build_level_series
-# does, and _level_on_date / storage_ok / any_future_overflow now use it.
+# FIX 1: _build_level_series — start from min(today, earliest_relevant_date)
+# so that dates before today (e.g. past dates selected in Book Slot) are always
+# present in the returned dict, eliminating the KeyError on target_ds.
 # =============================================================================
 
 def _build_level_series(form: str, schedule: dict, horizon_end: date,
                          extra_date: str = None, extra_qty: float = 0.0) -> dict:
     """
-    True day-by-day running simulation from today through horizon_end (inclusive).
-    Floors the level at 0 each day so outflow can never be "pre-credited"
-    against inflow that hasn't happened yet. Returns {date_str: level}.
+    True day-by-day running simulation.
+    Starts from the earliest relevant date so past-date selections never
+    produce a KeyError when the caller looks up target_ds.
+    Floors level at 0 each day (tank cannot go negative).
+    Returns {date_str: level}.
     """
     today   = date.today()
     outflow = DAILY_LIQUID_OUTFLOW_M3 if form == "liquid" else DAILY_SOLID_OUTFLOW_TONS
     level   = LIQUID_INITIAL_STOCK_M3  if form == "liquid" else SOLID_INITIAL_STOCK_TONS
 
+    # Determine the earliest date we need in the output so target_ds is
+    # always present even when the user selects a date before today.
+    start = today
+    if extra_date:
+        try:
+            extra_d = date.fromisoformat(extra_date)
+            start = min(start, extra_d)
+        except ValueError:
+            pass
+    # Also pull start back to horizon_end if horizon_end is before today
+    start = min(start, horizon_end)
+
     levels = {}
-    cur = today
+    cur = start
     while cur <= horizon_end:
         d_str  = cur.strftime("%Y-%m-%d")
         inflow = schedule.get((d_str, form), 0.0)
         if extra_date and d_str == extra_date:
             inflow += extra_qty
         level = level + inflow - outflow
-        level = max(0.0, level)   # tank cannot go negative
+        level = max(0.0, level)
         levels[d_str] = level
         cur += timedelta(days=1)
     return levels
@@ -378,30 +320,23 @@ def _build_level_series(form: str, schedule: dict, horizon_end: date,
 def _level_on_date(target: date, form: str,
                    schedule: dict,
                    extra_date: str = None, extra_qty: float = 0.0) -> float:
-    """
-    Pure in-memory calculation of storage level at END of target date.
-    schedule = output of _fetch_booked_schedule()
-    extra_date / extra_qty = a hypothetical delivery not yet in DB.
-    Now backed by a true running simulation (see _build_level_series) instead
-    of the closed-form initial + total_in - outflow*days, which let oversized
-    far-future deliveries hide behind outflow that hadn't happened yet.
-    """
     horizon_end = target
     if extra_date:
-        extra_d = date.fromisoformat(extra_date)
-        if extra_d > horizon_end:
-            horizon_end = extra_d
+        try:
+            extra_d = date.fromisoformat(extra_date)
+            if extra_d > horizon_end:
+                horizon_end = extra_d
+        except ValueError:
+            pass
     levels = _build_level_series(form, schedule, horizon_end, extra_date, extra_qty)
-    return levels[target.strftime("%Y-%m-%d")]
+    # FIX 3: use .get() as safety net so missing keys return 0 instead of KeyError
+    return levels.get(target.strftime("%Y-%m-%d"), 0.0)
 
 
 def storage_ok(target: date, qty: float, form: str,
                schedule: dict = None) -> tuple:
     """
     Returns (feasible, worst_level, available_on_target, first_overflow_date).
-    - available_on_target = space free on the target date BEFORE this booking
-    - Scans target → target+60 with the extra qty to find any future overflow
-    - Also scans today → target-1 to detect pre-existing overflows from existing bookings
     """
     if schedule is None:
         schedule = _fetch_booked_schedule()
@@ -409,22 +344,22 @@ def storage_ok(target: date, qty: float, form: str,
     target_ds = target.strftime("%Y-%m-%d")
     today     = date.today()
 
-    # Baseline level on the target date, WITHOUT this hypothetical booking
     before_levels = _build_level_series(form, schedule, target)
-    before        = before_levels[target_ds]
+    # FIX 3: safe get instead of direct key access
+    before        = before_levels.get(target_ds, 0.0)
     available     = max(0.0, cap - before)
 
-    # Now scan today → target+60 WITH the extra booking applied on target date
     horizon_end = target + timedelta(days=60)
     with_levels = _build_level_series(form, schedule, horizon_end,
                                        extra_date=target_ds, extra_qty=qty)
 
     first_overflow = None
     worst_level    = -999999.0
-    cur = today
+    cur = min(today, target)   # scan from earliest relevant date
     while cur <= horizon_end:
         d_str = cur.strftime("%Y-%m-%d")
-        lv    = with_levels[d_str]
+        # FIX 3: safe get
+        lv    = with_levels.get(d_str, 0.0)
         if lv > worst_level:
             worst_level = lv
         if lv > cap and first_overflow is None:
@@ -436,7 +371,6 @@ def storage_ok(target: date, qty: float, form: str,
 
 def any_future_overflow(form: str, horizon: int = 60,
                         schedule: dict = None) -> tuple:
-    """Check existing bookings for future overflow. Returns (exists, date, level)."""
     if schedule is None:
         schedule = _fetch_booked_schedule()
     cap   = LIQUID_STORAGE_CAPACITY_M3 if form == "liquid" else SOLID_STORAGE_CAPACITY_TONS
@@ -446,7 +380,7 @@ def any_future_overflow(form: str, horizon: int = 60,
     for i in range(horizon):
         d     = today + timedelta(days=i)
         d_str = d.strftime("%Y-%m-%d")
-        lv    = levels[d_str]
+        lv    = levels.get(d_str, 0.0)
         if lv > cap:
             return (True, d_str, lv)
     return (False, None, 0.0)
@@ -454,7 +388,6 @@ def any_future_overflow(form: str, horizon: int = 60,
 
 def projected_liquid_level(target: date, extra: float = 0.0,
                             excl_id: int = None) -> float:
-    """Backwards-compat wrapper — uses in-memory schedule."""
     sched = _fetch_booked_schedule()
     extra_date = target.strftime("%Y-%m-%d") if extra else None
     return _level_on_date(target, "liquid", sched,
@@ -463,7 +396,6 @@ def projected_liquid_level(target: date, extra: float = 0.0,
 
 def projected_solid_level(target: date, extra: float = 0.0,
                            excl_id: int = None) -> float:
-    """Backwards-compat wrapper — uses in-memory schedule."""
     sched = _fetch_booked_schedule()
     extra_date = target.strftime("%Y-%m-%d") if extra else None
     return _level_on_date(target, "solid", sched,
@@ -471,8 +403,7 @@ def projected_solid_level(target: date, extra: float = 0.0,
 
 
 def build_forecast_df(days: int = 14) -> pd.DataFrame:
-    """Day-by-day forecast — single DB fetch, all maths in memory."""
-    schedule = _fetch_booked_schedule()  # ONE query for everything
+    schedule = _fetch_booked_schedule()
     rows     = []
     today    = date.today()
 
@@ -564,14 +495,6 @@ def get_truck_schedule(d: date) -> pd.DataFrame:
 def build_plan_bookings(farmer_id, manure_form, manure_type_id,
                         total_qty, start_date, end_date,
                         preferred_slot, transport_required, assigned_worker):
-    """
-    Split total_qty across working days.
-    Checks per day (cumulatively):
-      1. Storage feasibility (forward 60 days)
-      2. Truck slot availability (in-memory sim so same-plan earlier days block later ones)
-      3. Driver 240-min/day limit (DB + in-memory accumulator)
-    Returns (ok_list, ov_skip, cf_skip).
-    """
     cap   = LIQUID_TRUCK_CAPACITY_M3 if manure_form=="liquid" else SOLID_TRUCK_CAPACITY_TONS
     truck = TRUCKS.get(manure_form) if transport_required else None
     wdays = [start_date + timedelta(days=i)
@@ -588,10 +511,9 @@ def build_plan_bookings(farmer_id, manure_form, manure_type_id,
     cf_skip  = []
     remaining = total_qty
 
-    # In-memory simulation schedules
-    sim_schedule     = dict(_fetch_booked_schedule())   # storage
-    sim_truck_slots  = {}   # { (d_str, slot): True } — truck slots taken this plan
-    sim_worker_mins  = {}   # { d_str: minutes_already_assigned_this_plan }
+    sim_schedule     = dict(_fetch_booked_schedule())
+    sim_truck_slots  = {}
+    sim_worker_mins  = {}
 
     for d in wdays:
         if remaining <= 0:
@@ -599,14 +521,12 @@ def build_plan_bookings(farmer_id, manure_form, manure_type_id,
         day_qty = min(actual_d, remaining)
         d_str   = d.strftime("%Y-%m-%d")
 
-        # ── 1. Recalculate trips for this day_qty ──────────────────────────
         trips    = max(1, -(-int(day_qty) // int(cap)))
         dur      = calc_dur(trips)
         ns       = slots_needed(trips)
         blocked  = get_slots_from(preferred_slot, ns)
         end_slot = blocked[-1] if blocked else preferred_slot
 
-        # ── 2. Storage check ───────────────────────────────────────────────
         ok, lv_after, available, first_ov = storage_ok(d, day_qty, manure_form, sim_schedule)
         if not ok or first_ov:
             if available <= 0:
@@ -614,7 +534,6 @@ def build_plan_bookings(farmer_id, manure_form, manure_type_id,
                 remaining -= day_qty
                 continue
             else:
-                # Cap to available space
                 day_qty  = round(available, 2)
                 trips    = max(1, -(-int(day_qty) // int(cap)))
                 dur      = calc_dur(trips)
@@ -624,11 +543,8 @@ def build_plan_bookings(farmer_id, manure_form, manure_type_id,
                 ov_skip.append({"date": d_str,
                                 "reason": f"Capped to {day_qty:.1f} (overflow {first_ov})"})
 
-        # ── 3. Truck slot check (DB + in-memory plan slots) ───────────────
         if transport_required and truck:
-            # DB conflicts
             db_cf = truck_conflicts(d_str, truck, preferred_slot, ns)
-            # In-memory conflicts (from earlier days in this plan)
             mem_cf = [s for s in blocked if sim_truck_slots.get((d_str, s))]
             all_cf = list(set(db_cf + mem_cf))
             if all_cf:
@@ -637,7 +553,6 @@ def build_plan_bookings(farmer_id, manure_form, manure_type_id,
                 remaining -= day_qty
                 continue
 
-            # ── 4. Driver 240-min/day limit ───────────────────────────────
             try:
                 db_mins = int(scalar(
                     """SELECT COALESCE(SUM(COALESCE(total_duration_min,:dd)),0)
@@ -651,7 +566,6 @@ def build_plan_bookings(farmer_id, manure_form, manure_type_id,
             if total_mins > 240:
                 remaining_min = 240 - db_mins - plan_mins
                 if remaining_min >= TRIP_DURATION_MIN:
-                    # Can do fewer trips
                     max_trips = remaining_min // TRIP_DURATION_MIN
                     day_qty   = round(min(max_trips * cap, day_qty), 2)
                     trips     = max_trips
@@ -669,7 +583,6 @@ def build_plan_bookings(farmer_id, manure_form, manure_type_id,
                     remaining -= day_qty
                     continue
 
-        # ── Accept this day ────────────────────────────────────────────────
         ok_list.append({
             "farmer_id":              farmer_id,
             "delivery_date":          d_str,
@@ -686,7 +599,6 @@ def build_plan_bookings(farmer_id, manure_form, manure_type_id,
             "end_time_slot":          end_slot,
         })
 
-        # Update all simulation dicts so subsequent days see this booking
         key = (d_str, manure_form)
         sim_schedule[key] = sim_schedule.get(key, 0.0) + day_qty
 
@@ -708,19 +620,12 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
-/* ── Reset & Base ──────────────────────────────────────────────────────── */
 * { font-family: 'Inter', sans-serif !important; box-sizing: border-box; }
 
-[data-testid="stAppViewContainer"] {
-    background: #0b1120 !important;
-}
-[data-testid="stMain"] > div {
-    background: #0b1120 !important;
-    padding-top: 0 !important;
-}
+[data-testid="stAppViewContainer"] { background: #0b1120 !important; }
+[data-testid="stMain"] > div { background: #0b1120 !important; padding-top: 0 !important; }
 [data-testid="stHeader"] { background: transparent !important; }
 
-/* ── Sidebar ────────────────────────────────────────────────────────────── */
 [data-testid="stSidebar"] {
     background: #0f172a !important;
     border-right: 1px solid #1e293b !important;
@@ -736,74 +641,24 @@ st.markdown("""
                                 text-transform: uppercase; }
 [data-testid="stSidebar"] hr { border-color: #1e293b !important; margin: 12px 0 !important; }
 
-/* ── Sidebar collapse/expand toggle button ──────────────────────────────── */
-[data-testid="stSidebarCollapsedControl"] {
-    background: #1e293b !important;
-    border: 1px solid #334155 !important;
-    border-radius: 50% !important;
-    width: 36px !important;
-    height: 36px !important;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.4) !important;
-    transition: all 0.2s !important;
-    position: relative !important;
-}
-[data-testid="stSidebarCollapsedControl"]:hover {
-    background: #22c55e !important;
-    border-color: #22c55e !important;
-}
-/* Hide the material icon text by making it transparent and zero size */
-[data-testid="stSidebarCollapsedControl"] span {
-    font-size: 0 !important;
-    color: transparent !important;
-}
-[data-testid="stSidebarCollapsedControl"] button {
-    font-size: 0 !important;
-    color: transparent !important;
-}
-/* Replace with ☰ using pseudo on the inner button */
-[data-testid="stSidebarCollapsedControl"] button::after {
-    content: "☰" !important;
-    font-size: 16px !important;
-    color: #94a3b8 !important;
-    font-family: Arial, sans-serif !important;
-    position: absolute !important;
-    top: 50% !important;
-    left: 50% !important;
-    transform: translate(-50%, -50%) !important;
-}
-[data-testid="stSidebarCollapsedControl"]:hover button::after {
-    color: #ffffff !important;
-}
-
-/* ── Sidebar metrics ────────────────────────────────────────────────────── */
 [data-testid="stSidebar"] [data-testid="stMetric"] {
-    background: #1e293b !important;
-    border: 1px solid #334155 !important;
-    border-radius: 10px !important;
-    padding: 10px 14px !important;
-    margin-bottom: 6px !important;
+    background: #1e293b !important; border: 1px solid #334155 !important;
+    border-radius: 10px !important; padding: 10px 14px !important; margin-bottom: 6px !important;
 }
 [data-testid="stSidebar"] [data-testid="stMetricLabel"] { color: #64748b !important; font-size: 0.72rem !important; }
 [data-testid="stSidebar"] [data-testid="stMetricValue"] { color: #f1f5f9 !important; font-size: 1.1rem !important; font-weight: 700 !important; }
 
-/* ── Main metrics ────────────────────────────────────────────────────────── */
 [data-testid="stMetric"] {
-    background: #1e293b !important;
-    border: 1px solid #334155 !important;
-    border-radius: 12px !important;
-    padding: 16px 20px !important;
+    background: #1e293b !important; border: 1px solid #334155 !important;
+    border-radius: 12px !important; padding: 16px 20px !important;
     transition: border-color 0.2s, box-shadow 0.2s;
 }
-[data-testid="stMetric"]:hover {
-    border-color: #22c55e !important;
-    box-shadow: 0 0 0 1px rgba(34,197,94,0.2) !important;
-}
+[data-testid="stMetric"]:hover { border-color: #22c55e !important; box-shadow: 0 0 0 1px rgba(34,197,94,0.2) !important; }
 [data-testid="stMetricLabel"] { color: #64748b !important; font-size: 0.76rem !important;
                                   font-weight: 500 !important; letter-spacing: 0.03em; text-transform: uppercase; }
 [data-testid="stMetricValue"] { color: #f1f5f9 !important; font-size: 1.5rem !important; font-weight: 700 !important; }
 [data-testid="stMetricDelta"]  { font-size: 0.78rem !important; }
 
-/* ── Typography ─────────────────────────────────────────────────────────── */
 h1 { color: #f1f5f9 !important; font-size: 1.6rem !important; font-weight: 700 !important; }
 h2 { color: #e2e8f0 !important; font-size: 1.2rem !important; font-weight: 600 !important; }
 h3 { color: #cbd5e1 !important; font-size: 1rem !important; font-weight: 600 !important; }
@@ -813,21 +668,14 @@ p, label, .stMarkdown, span { color: #94a3b8 !important; font-size: 0.87rem !imp
 strong { color: #e2e8f0 !important; }
 hr { border-color: #1e293b !important; margin: 16px 0 !important; }
 
-/* ── Tabs ────────────────────────────────────────────────────────────────── */
 [data-baseweb="tab-list"] {
-    background: #1e293b !important;
-    border-radius: 12px !important;
-    padding: 4px !important;
-    gap: 2px !important;
-    border: 1px solid #334155 !important;
+    background: #1e293b !important; border-radius: 12px !important;
+    padding: 4px !important; gap: 2px !important; border: 1px solid #334155 !important;
 }
 [data-baseweb="tab"] {
-    border-radius: 8px !important;
-    padding: 8px 18px !important;
-    color: #64748b !important;
-    font-weight: 500 !important;
-    font-size: 0.82rem !important;
-    transition: all 0.15s !important;
+    border-radius: 8px !important; padding: 8px 18px !important;
+    color: #64748b !important; font-weight: 500 !important;
+    font-size: 0.82rem !important; transition: all 0.15s !important;
 }
 [data-baseweb="tab"]:hover { color: #94a3b8 !important; background: #334155 !important; }
 [aria-selected="true"] {
@@ -836,35 +684,27 @@ hr { border-color: #1e293b !important; margin: 16px 0 !important; }
     box-shadow: 0 2px 8px rgba(22,101,52,0.4) !important;
 }
 
-/* ── Buttons ─────────────────────────────────────────────────────────────── */
 [data-testid="baseButton-primary"] {
     background: linear-gradient(135deg, #16a34a, #15803d) !important;
     border: none !important; border-radius: 8px !important;
     color: #fff !important; font-weight: 600 !important; font-size: 0.85rem !important;
-    box-shadow: 0 2px 8px rgba(22,163,74,0.35) !important;
-    transition: all 0.15s !important;
+    box-shadow: 0 2px 8px rgba(22,163,74,0.35) !important; transition: all 0.15s !important;
 }
 [data-testid="baseButton-primary"]:hover {
     background: linear-gradient(135deg, #22c55e, #16a34a) !important;
-    box-shadow: 0 4px 14px rgba(22,163,74,0.45) !important;
-    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 14px rgba(22,163,74,0.45) !important; transform: translateY(-1px) !important;
 }
 [data-testid="baseButton-primary"]:disabled {
-    background: #1e293b !important;
-    color: #475569 !important; box-shadow: none !important;
-    transform: none !important; cursor: not-allowed !important;
+    background: #1e293b !important; color: #475569 !important;
+    box-shadow: none !important; transform: none !important; cursor: not-allowed !important;
 }
 [data-testid="baseButton-secondary"] {
-    background: transparent !important;
-    border: 1px solid #334155 !important; border-radius: 8px !important;
-    color: #94a3b8 !important; font-weight: 500 !important;
-    transition: all 0.15s !important;
+    background: transparent !important; border: 1px solid #334155 !important;
+    border-radius: 8px !important; color: #94a3b8 !important;
+    font-weight: 500 !important; transition: all 0.15s !important;
 }
-[data-testid="baseButton-secondary"]:hover {
-    border-color: #22c55e !important; color: #22c55e !important;
-}
+[data-testid="baseButton-secondary"]:hover { border-color: #22c55e !important; color: #22c55e !important; }
 
-/* ── Form inputs ─────────────────────────────────────────────────────────── */
 [data-testid="stTextInput"] > div > div > input,
 [data-testid="stNumberInput"] input,
 [data-testid="stTextArea"] textarea {
@@ -875,29 +715,23 @@ hr { border-color: #1e293b !important; margin: 16px 0 !important; }
 [data-testid="stTextInput"] > div > div > input:focus,
 [data-testid="stNumberInput"] input:focus,
 [data-testid="stTextArea"] textarea:focus {
-    border-color: #22c55e !important;
-    box-shadow: 0 0 0 3px rgba(34,197,94,0.12) !important;
-    outline: none !important;
+    border-color: #22c55e !important; box-shadow: 0 0 0 3px rgba(34,197,94,0.12) !important; outline: none !important;
 }
 
-/* ── Selects / Dropdowns ─────────────────────────────────────────────────── */
 [data-baseweb="select"] > div {
     background: #1e293b !important; border: 1px solid #334155 !important;
     border-radius: 8px !important; color: #f1f5f9 !important;
 }
 [data-baseweb="select"] > div:focus-within {
-    border-color: #22c55e !important;
-    box-shadow: 0 0 0 3px rgba(34,197,94,0.12) !important;
+    border-color: #22c55e !important; box-shadow: 0 0 0 3px rgba(34,197,94,0.12) !important;
 }
 [data-baseweb="popover"] { background: #1e293b !important; border: 1px solid #334155 !important; border-radius: 10px !important; }
 [role="option"] { color: #e2e8f0 !important; }
 [role="option"]:hover { background: #334155 !important; }
 
-/* ── Radio buttons ───────────────────────────────────────────────────────── */
 [data-testid="stRadio"] label { color: #94a3b8 !important; }
 [data-testid="stRadio"] [data-testid="stMarkdownContainer"] p { color: #94a3b8 !important; }
 
-/* ── DataFrames / Tables ─────────────────────────────────────────────────── */
 [data-testid="stDataFrame"] {
     background: #1e293b !important; border-radius: 12px !important;
     border: 1px solid #334155 !important; overflow: hidden !important;
@@ -910,24 +744,19 @@ hr { border-color: #1e293b !important; margin: 16px 0 !important; }
 [data-testid="stDataFrame"] tbody td { color: #e2e8f0 !important; font-size: 0.84rem !important; }
 [data-testid="stDataFrame"] tbody tr:hover td { background: rgba(34,197,94,0.05) !important; }
 
-/* ── Alerts ──────────────────────────────────────────────────────────────── */
 [data-testid="stAlert"] { border-radius: 10px !important; font-size: 0.85rem !important; border-left-width: 3px !important; }
 [data-testid="stAlert"][data-baseweb="notification"] { background: #0f172a !important; }
 
-/* ── Progress bar ────────────────────────────────────────────────────────── */
 [data-testid="stProgress"] > div > div { background: #22c55e !important; border-radius: 99px !important; }
 [data-testid="stProgress"] > div { background: #1e293b !important; border-radius: 99px !important; }
 
-/* ── Checkbox ────────────────────────────────────────────────────────────── */
 [data-testid="stCheckbox"] label { color: #94a3b8 !important; }
 
-/* ── Scrollbar ───────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: #0b1120; }
 ::-webkit-scrollbar-thumb { background: #334155; border-radius: 99px; }
 ::-webkit-scrollbar-thumb:hover { background: #475569; }
 
-/* ── Custom components ───────────────────────────────────────────────────── */
 .page-header {
     display: flex; align-items: center; justify-content: space-between;
     padding: 16px 0 12px; border-bottom: 1px solid #1e293b; margin-bottom: 20px;
@@ -936,8 +765,7 @@ hr { border-color: #1e293b !important; margin: 16px 0 !important; }
 .app-logo {
     width: 38px; height: 38px; border-radius: 10px;
     background: linear-gradient(135deg, #22c55e, #15803d);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 18px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0;
 }
 .app-name { font-size: 1.2rem; font-weight: 700; color: #f1f5f9 !important; margin: 0; }
 .app-sub  { font-size: 0.75rem; color: #475569 !important; margin: 0; }
@@ -945,8 +773,7 @@ hr { border-color: #1e293b !important; margin: 16px 0 !important; }
 .status-bar {
     display: flex; align-items: center; gap: 6px;
     background: #1e293b; border: 1px solid #334155;
-    border-radius: 10px; padding: 10px 16px; margin-bottom: 16px;
-    flex-wrap: wrap;
+    border-radius: 10px; padding: 10px 16px; margin-bottom: 16px; flex-wrap: wrap;
 }
 .status-item { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: #94a3b8; }
 .status-val  { font-weight: 600; color: #f1f5f9; }
@@ -958,8 +785,7 @@ hr { border-color: #1e293b !important; margin: 16px 0 !important; }
 .section-title {
     font-size: 0.72rem; font-weight: 600; color: #475569;
     text-transform: uppercase; letter-spacing: 0.08em;
-    margin: 0 0 10px; padding-bottom: 6px;
-    border-bottom: 1px solid #1e293b;
+    margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid #1e293b;
 }
 .user-badge {
     display: inline-flex; align-items: center; gap: 8px;
@@ -980,30 +806,8 @@ hr { border-color: #1e293b !important; margin: 16px 0 !important; }
 </style>""", unsafe_allow_html=True)
 
 # =============================================================================
-# =============================================================================
 # SIDEBAR
 # =============================================================================
-# Inject JS to replace the keyboard_double_arr icon with a hamburger symbol
-st.markdown("""
-<script>
-function fixSidebarButton() {
-    const btns = window.parent.document.querySelectorAll('[data-testid="stSidebarCollapsedControl"] button');
-    btns.forEach(btn => {
-        btn.innerHTML = '&#9776;';
-        btn.style.fontSize = '18px';
-        btn.style.color = '#94a3b8';
-        btn.style.background = 'none';
-        btn.style.border = 'none';
-        btn.style.cursor = 'pointer';
-    });
-}
-// Run on load and watch for DOM changes
-fixSidebarButton();
-const observer = new MutationObserver(fixSidebarButton);
-observer.observe(window.parent.document.body, { childList: true, subtree: true });
-</script>
-""", unsafe_allow_html=True)
-
 with st.sidebar:
     uname = st.session_state.get('username','?')
     role  = st.session_state.get('role','operator')
@@ -1089,33 +893,6 @@ with hc2:
     except Exception:
         pass
 
-
-# Inject JS to replace the keyboard_double_arr text with ☰
-st.markdown("""
-<script>
-function fixSidebarBtn() {
-    const btns = window.parent.document.querySelectorAll('[data-testid="stSidebarCollapsedControl"] button');
-    btns.forEach(btn => {
-        const spans = btn.querySelectorAll('span');
-        spans.forEach(s => {
-            if (s.innerText && s.innerText.includes('keyboard')) {
-                s.innerText = '☰';
-                s.style.fontSize = '18px';
-                s.style.fontFamily = 'Arial, sans-serif';
-                s.style.color = '#94a3b8';
-            }
-        });
-    });
-}
-// Run on load and observe for changes
-fixSidebarBtn();
-setTimeout(fixSidebarBtn, 500);
-setTimeout(fixSidebarBtn, 1500);
-const observer = new MutationObserver(fixSidebarBtn);
-observer.observe(window.parent.document.body, { childList: true, subtree: true });
-</script>
-""", unsafe_allow_html=True)
-
 tab1,tab2,tab3,tab4,tab5,tab6,tab7,tab8 = st.tabs([
     "📋 Book Slot","🚛 Record Delivery","📆 Daily Schedule","🚚 Truck Calendar",
     "🏭 Storage Forecast","📊 Capacity Report","📦 Delivery Plans","👨‍🌾 Manage Farmers"
@@ -1151,6 +928,7 @@ with tab1:
             b_form  = st.selectbox("💧 Form",               ["liquid","solid"], key="b_form")
             b_unit  = "m³" if b_form=="liquid" else "t"
             cap_val = LIQUID_STORAGE_CAPACITY_M3 if b_form=="liquid" else SOLID_STORAGE_CAPACITY_TONS
+            # FIX: use .get() index [2] safely — storage_ok now handles past dates
             _avail  = max(0.0, storage_ok(b_date, 0.0, b_form)[2])
             b_qty   = st.number_input(
                 f"📦 Quantity ({b_unit})",
@@ -1171,7 +949,6 @@ with tab1:
             if not needs_tr:
                 st.success("✅ Farmer brings own transport")
 
-        # Storage check
         ok, lv_after, available, first_ov = storage_ok(b_date, b_qty, b_form)
         already_ov, already_ov_date, already_ov_lv = any_future_overflow(b_form)
 
@@ -1197,7 +974,6 @@ with tab1:
                      f"(peak {lv_after:.0f} {b_unit}). "
                      f"Max safely bookable: **{available:.0f} {b_unit}**.")
 
-        # Trip info + worker check
         _worker_ok = True
         _wb = 0
         if needs_tr:
@@ -1213,7 +989,6 @@ with tab1:
             ti4.metric("Last load",        f"{b_qty-(trips-1)*cap_per:.1f} {b_unit}")
             st.caption(f"🚛 {TRUCKS[b_form]} | Slots: **{', '.join(blocked)}**")
 
-            # Live truck conflict check
             _truck_cf = truck_conflicts(b_date.strftime("%Y-%m-%d"), TRUCKS[b_form], b_slot, ns)
             if _truck_cf:
                 st.error(f"❌ **{TRUCKS[b_form]} is already booked** on slots: "
@@ -1302,6 +1077,8 @@ with tab1:
 # ── TAB 2 — RECORD DELIVERY ──────────────────────────────────────────────────
 with tab2:
     st.subheader("🚛 Record Delivery or Cancel Booking")
+
+    # FIX 2: always show fresh data — cleared after every action below
     try:
         ob = fetch_df("""
             SELECT b.booking_id AS "ID", f.name AS farmer, b.delivery_date,
@@ -1313,7 +1090,6 @@ with tab2:
             LEFT JOIN manure_types mt ON mt.manure_type_id=b.planned_manure_type_id
             WHERE b.status='booked' ORDER BY b.delivery_date, b.time_slot
         """)
-        # keep booking_id as numeric column for the selectbox (hidden from display)
         ob["booking_id"] = ob["ID"]
         ob_display = ob.drop(columns=["booking_id"])
         mtd = fetch_df("SELECT manure_type_id,name FROM manure_types ORDER BY name")
@@ -1326,6 +1102,7 @@ with tab2:
         st.dataframe(ob_display, use_container_width=True, hide_index=True)
         mm2 = dict(zip(mtd["name"], mtd["manure_type_id"]))
         bids= ob["booking_id"].tolist()
+
         st.markdown("#### ✅ Record a Delivery")
         r1,r2,r3 = st.columns(3)
         with r1: d_bid = st.selectbox("Booking ID",      bids,            key="d_bid")
@@ -1339,8 +1116,13 @@ with tab2:
                          {"bid":int(d_bid),"mid":int(mm2[d_mt]),"qty":float(d_qty)})
                 exec_one("UPDATE bookings SET status='completed' WHERE booking_id=:bid",
                          {"bid":int(d_bid)})
-                st.success("✅ Delivery recorded."); st.rerun()
-            except Exception as e: st.error(f"❌ {e}")
+                # FIX 2: clear cache so all tabs reflect the status change immediately
+                _fetch_booked_schedule.clear()
+                st.success(f"✅ Delivery recorded for booking #{d_bid}.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ {e}")
+
         st.divider()
         st.markdown("#### ❌ Cancel a Booking")
         cb = st.selectbox("Booking ID", bids, key="cb")
@@ -1348,43 +1130,69 @@ with tab2:
             try:
                 exec_one("UPDATE bookings SET status='cancelled' WHERE booking_id=:id",
                          {"id":int(cb)})
-                st.success(f"✅ Booking #{cb} cancelled."); _fetch_booked_schedule.clear(); st.rerun()
-            except Exception as e: st.error(f"❌ {e}")
+                # FIX 2: clear cache on cancel too
+                _fetch_booked_schedule.clear()
+                st.success(f"✅ Booking #{cb} cancelled.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ {e}")
 
 # ── TAB 3 — DAILY SCHEDULE ───────────────────────────────────────────────────
 with tab3:
     st.subheader(f"📆 Daily Schedule — {date_str}")
-    try:
-        sc = fetch_df("""
-            SELECT b.booking_id, b.time_slot, f.name AS farmer,
-                   b.manure_form, mt.name AS type,
-                   b.expected_tons, COALESCE(d.quantity_tons,0) AS actual,
-                   COALESCE(b.transport_required,FALSE)        AS transport,
-                   COALESCE(b.assigned_truck,'own')            AS truck,
-                   COALESCE(b.assigned_worker,'—')             AS worker,
-                   COALESCE(b.trips_count,1)                   AS trips,
-                   b.status
-            FROM bookings b JOIN farmers f ON f.farmer_id=b.farmer_id
-            LEFT JOIN deliveries d ON d.booking_id=b.booking_id
-            LEFT JOIN manure_types mt ON mt.manure_type_id=b.planned_manure_type_id
-            WHERE b.delivery_date=:date ORDER BY b.time_slot
-        """, {"date":date_str})
-    except Exception as e:
-        st.error(f"DB error: {e}"); sc = pd.DataFrame()
 
-    if sc.empty:
-        st.info(f"📭 No bookings for {date_str}.")
+    # Status filter so users can hide completed/cancelled rows if desired
+    t3_col1, t3_col2 = st.columns([3, 1])
+    with t3_col1:
+        show_statuses = st.multiselect(
+            "Show statuses",
+            options=["booked", "completed", "cancelled"],
+            default=["booked", "completed"],
+            key="t3_status_filter"
+        )
+    with t3_col2:
+        if st.button("🔄 Refresh", key="t3_refresh"):
+            _fetch_booked_schedule.clear()
+            st.rerun()
+
+    if not show_statuses:
+        st.info("Select at least one status to display.")
     else:
-        st.dataframe(sc, use_container_width=True, hide_index=True)
-        liq = sc[sc["manure_form"]=="liquid"]["expected_tons"].sum()
-        sol = sc[sc["manure_form"]=="solid"]["expected_tons"].sum()
-        m1,m2,m3,m4 = st.columns(4)
-        m1.metric("Liquid (m³)",   f"{liq:.0f}")
-        m2.metric("Solid (t)",     f"{sol:.0f}")
-        m3.metric("Plant LKW",     sc[sc["transport"]==True].shape[0])
-        m4.metric("Own transport", sc[sc["transport"]==False].shape[0])
-    st.download_button("⬇️ CSV", data=sc.to_csv(index=False).encode() if not sc.empty else b"",
-                       file_name=f"schedule_{date_str}.csv", mime="text/csv", key="dl_s3")
+        status_in = "','".join(show_statuses)
+        try:
+            sc = fetch_df(f"""
+                SELECT b.booking_id, b.time_slot, f.name AS farmer,
+                       b.manure_form, mt.name AS type,
+                       b.expected_tons, COALESCE(d.quantity_tons,0) AS actual,
+                       COALESCE(b.transport_required,FALSE)        AS transport,
+                       COALESCE(b.assigned_truck,'own')            AS truck,
+                       COALESCE(b.assigned_worker,'—')             AS worker,
+                       COALESCE(b.trips_count,1)                   AS trips,
+                       b.status
+                FROM bookings b JOIN farmers f ON f.farmer_id=b.farmer_id
+                LEFT JOIN deliveries d ON d.booking_id=b.booking_id
+                LEFT JOIN manure_types mt ON mt.manure_type_id=b.planned_manure_type_id
+                WHERE b.delivery_date=:date AND b.status IN ('{status_in}')
+                ORDER BY b.time_slot
+            """, {"date":date_str})
+        except Exception as e:
+            st.error(f"DB error: {e}"); sc = pd.DataFrame()
+
+        if sc.empty:
+            st.info(f"📭 No bookings matching selected statuses for {date_str}.")
+        else:
+            st.dataframe(sc, use_container_width=True, hide_index=True)
+            liq = sc[sc["manure_form"]=="liquid"]["expected_tons"].sum()
+            sol = sc[sc["manure_form"]=="solid"]["expected_tons"].sum()
+            m1,m2,m3,m4 = st.columns(4)
+            m1.metric("Liquid (m³)",   f"{liq:.0f}")
+            m2.metric("Solid (t)",     f"{sol:.0f}")
+            m3.metric("Plant LKW",     sc[sc["transport"]==True].shape[0])
+            m4.metric("Own transport", sc[sc["transport"]==False].shape[0])
+        st.download_button("⬇️ CSV",
+                           data=sc.to_csv(index=False).encode() if not sc.empty else b"",
+                           file_name=f"schedule_{date_str}.csv",
+                           mime="text/csv", key="dl_s3")
 
 # ── TAB 4 — TRUCK CALENDAR ───────────────────────────────────────────────────
 with tab4:
@@ -1635,6 +1443,8 @@ with tab7:
             pp_needs=pp_tr.startswith("Ja")
             pp_worker=st.selectbox("👷 Worker",WORKERS,key="pp_w") if pp_needs else None
 
+            _plan_blocked = False
+
             if ppe>=pps:
                 cap_u=LIQUID_TRUCK_CAPACITY_M3 if ppfm=="liquid" else SOLID_TRUCK_CAPACITY_TONS
                 unit_u="m³" if ppfm=="liquid" else "t"
@@ -1655,7 +1465,6 @@ with tab7:
                     sim_truck_slots= {}
                     sim_worker_mins= {}
                     pp_truck = TRUCKS.get(ppfm) if pp_needs else None
-                    # Track blocking conditions for the button
                     _any_overflow    = False
                     _any_driver_over = False
                     _any_truck_cf    = False
@@ -1665,7 +1474,6 @@ with tab7:
                         dqd    = min(da, rem)
                         dp_str = dp.strftime("%Y-%m-%d")
 
-                        # Storage check
                         ok_p,lv_p,av_p,fov_p = storage_ok(dp,dqd,ppfm,sim_schedule)
                         if not ok_p and av_p > 0:
                             dqd = round(av_p, 2)
@@ -1676,7 +1484,6 @@ with tab7:
                         ns_p    = slots_needed(trips_p)
                         blk_p   = get_slots_from(ppsl, ns_p)
 
-                        # Truck conflict check
                         truck_flag = "—"
                         if pp_needs and pp_truck:
                             db_cf  = truck_conflicts(dp_str, pp_truck, ppsl, ns_p)
@@ -1686,7 +1493,6 @@ with tab7:
                             if all_cf:
                                 _any_truck_cf = True
 
-                        # Driver check
                         driver_flag = "—"
                         if pp_needs and pp_worker:
                             try:
@@ -1712,7 +1518,6 @@ with tab7:
                             wdays_warn.append(dp_str)
                             _any_overflow = True
 
-                        # Update sims for accepted days
                         has_conflict = (pp_needs and pp_truck and
                                         bool(set(truck_conflicts(dp_str, pp_truck, ppsl, ns_p) +
                                                  [s for s in blk_p if sim_truck_slots.get((dp_str,s))])))
@@ -1741,26 +1546,19 @@ with tab7:
 
                     st.dataframe(pd.DataFrame(prev),use_container_width=True,hide_index=True)
 
-                    # ── Blocking messages ──
                     if _any_overflow:
                         st.error(f"🔴 **Storage overflow on: {', '.join(wdays_warn)}** — "
-                                 f"reduce total quantity or extend the date range so "
-                                 f"outflow creates enough space before each delivery.")
+                                 f"reduce total quantity or extend the date range.")
                     if _any_driver_over:
-                        st.error(f"🔴 **Driver {pp_worker} exceeds 240 min/day limit** on one or more days — "
-                                 f"choose the other worker or reduce daily delivery quantity.")
+                        st.error(f"🔴 **Driver {pp_worker} exceeds 240 min/day limit** on one or more days.")
                     if _any_truck_cf:
-                        st.warning(f"🟠 **Truck {pp_truck} has slot conflicts** on one or more days — "
-                                   f"choose an earlier/later time slot.")
+                        st.warning(f"🟠 **Truck {pp_truck} has slot conflicts** on one or more days.")
 
                     _plan_blocked = _any_overflow or _any_driver_over
             else:
                 st.warning("End date must be after start date.")
 
             st.divider()
-            # Button is blocked if preview found overflow or driver issues
-            # If preview hasn't run yet (no wdays), default to not blocked
-            _plan_blocked = locals().get("_plan_blocked", False)
             if _plan_blocked:
                 st.info("💡 Fix the issues highlighted above before creating the plan.")
             if st.button("✅ Create Plan + Bookings", key="pp_create", type="primary",
@@ -1804,7 +1602,9 @@ with tab7:
                         msg=f"✅ Plan **#{pid}** — **{created}** bookings ({ppq:.0f} {ur} for {ppf})."
                         if ov_s: msg+=f"\n🔴 {len(ov_s)} day(s) skipped (overflow): {', '.join(d['date'] for d in ov_s)}"
                         if cf_s: msg+=f"\n🟠 {len(cf_s)} day(s) skipped (truck conflict): {', '.join(d['date'] for d in cf_s)}"
-                        st.success(msg); _fetch_booked_schedule.clear(); st.rerun()
+                        st.success(msg)
+                        _fetch_booked_schedule.clear()
+                        st.rerun()
                     except Exception as ex: st.error(f"❌ {ex}")
 
     with pv:
@@ -1862,7 +1662,8 @@ with tab7:
                     exec_one("DELETE FROM delivery_plans WHERE plan_id=:id",
                              {"id": int(del_pid)})
                     st.success(f"✅ Plan #{del_pid} and its bookings permanently deleted.")
-                    _fetch_booked_schedule.clear(); st.rerun()
+                    _fetch_booked_schedule.clear()
+                    st.rerun()
                 except Exception as e:
                     st.error(f"❌ {e} — Make sure no completed deliveries reference this plan, "
                              f"or uncheck 'Delete future only' to delete all bookings first.")
