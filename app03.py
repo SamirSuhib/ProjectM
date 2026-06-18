@@ -1306,34 +1306,13 @@ with tab5:
                       delta=f"{r['Solid Fill %']:.1f}%")
             f4.metric("Free Solid",  f"{SOLID_STORAGE_CAPACITY_TONS-r['Solid Level (t)']:.0f} t")
             
-        def hl(row):
+            def hl(row):
             ls = str(row.get("Liquid Status",""))
             ss = str(row.get("Solid Status",""))
             if "OVERFLOW" in ls or "OVERFLOW" in ss: return ["background-color:#3d1a1a"]*len(row)
             if "HIGH"     in ls or "HIGH"     in ss: return ["background-color:#2d2a1a"]*len(row)
             return [""]*len(row)
-        
-        # Display copy with cleaner formatting
-        fdf_display = fdf.copy()
-        
-        for col in [
-            "Liquid In (m³)",
-            "-Liquid Out (m³)",
-            "Liquid Level (m³)",
-            "Solid In (t)",
-            "-Solid Out (t)",
-            "Solid Level (t)"
-        ]:
-            fdf_display[col] = fdf_display[col].round(0)
-        
-        fdf_display["Liquid Fill %"] = fdf_display["Liquid Fill %"].round(1)
-        fdf_display["Solid Fill %"]  = fdf_display["Solid Fill %"].round(1)
-        
-        st.dataframe(
-            fdf_display.style.apply(hl, axis=1),
-            use_container_width=True,
-            hide_index=True
-        )
+        st.dataframe(fdf.style.apply(hl,axis=1), use_container_width=True, hide_index=True)
 
         fig,(ax1,ax2) = plt.subplots(2,1,figsize=(12,7),sharex=True)
         fig.patch.set_facecolor("#0f1a0f"); fig.subplots_adjust(hspace=0.35)
