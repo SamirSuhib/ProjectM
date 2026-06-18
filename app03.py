@@ -1202,6 +1202,25 @@ with tab3:
         if sc.empty:
             st.info(f"📭 No bookings matching selected statuses for {date_str}.")
         else:
+            sc = sc[
+            [
+                "booking_id",
+                "farmer",
+                "manure_form",
+                "type",
+                "expected_tons",
+                "actual",
+                "time_slot",
+                "trips",
+                "truck",
+                "worker",
+                "transport",
+                "status"
+                     ]
+                ].rename(columns={
+                    "booking_id": "Booking ID"
+                })
+            
             st.dataframe(sc, use_container_width=True, hide_index=True)
             liq = sc[sc["manure_form"]=="liquid"]["expected_tons"].sum()
             sol = sc[sc["manure_form"]=="solid"]["expected_tons"].sum()
