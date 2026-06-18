@@ -1090,8 +1090,25 @@ with tab2:
             LEFT JOIN manure_types mt ON mt.manure_type_id=b.planned_manure_type_id
             WHERE b.status='booked' ORDER BY b.delivery_date, b.time_slot
         """)
+
+         # keep booking_id as numeric column for the selectbox (hidden from display)
         ob["booking_id"] = ob["ID"]
-        ob_display = ob.drop(columns=["booking_id"])
+        ob_display = ob[
+                [
+                     "ID",
+                     "farmer",
+                     "manure_form",
+                     "planned_type",
+                     "expected_tons",
+                     "delivery_date",
+                     "time_slot",
+                     "truck",
+                     "worker",
+                     "status"
+                    ]
+                ].rename(columns={
+                "ID": "Booking ID"
+             })
         mtd = fetch_df("SELECT manure_type_id,name FROM manure_types ORDER BY name")
     except Exception as e:
         st.error(f"DB error: {e}"); ob = pd.DataFrame(); mtd = pd.DataFrame()
@@ -1163,21 +1180,21 @@ with tab3:
         status_in   = "','".join(show_statuses)
         safe_date   = date_str.replace("'", "")   # date_str is always YYYY-MM-DD, safe
         try:
-            sc = fetch_df(f"""
-                SELECT b.booking_id, b.time_slot, f.name AS farmer,
-                       b.manure_form, mt.name AS type,
-                       b.expected_tons, COALESCE(d.quantity_tons,0) AS actual,
-                       COALESCE(b.transport_required,FALSE)        AS transport,
-                       COALESCE(b.assigned_truck,'own')            AS truck,
-                       COALESCE(b.assigned_worker,'—')             AS worker,
-                       COALESCE(b.trips_count,1)                   AS trips,
-                       b.status
-                FROM bookings b JOIN farmers f ON f.farmer_id=b.farmer_id
-                LEFT JOIN deliveries d ON d.booking_id=b.booking_id
-                LEFT JOIN manure_types mt ON mt.manure_type_id=b.planned_manure_type_id
-                WHERE b.delivery_date='{safe_date}' AND b.status IN ('{status_in}')
-                ORDER BY b.time_slot
-            """)
+             sc = fetch_df("""
+            SELECT b.booking_id, f.name AS farmer,
+                   b.manure_form, mt.name AS type,
+                   b.expected_tons, COALESCE(d.quantity_tons,0) AS actual,
+                   b.time_slot, COALESCE(b.trips_count,1)       AS trips,
+                   COALESCE(b.assigned_truck,'own')             AS truck,
+                   COALESCE(b.assigned_worker,'—')              AS worker,
+                   COALESCE(b.transport_required,FALSE)         AS transport,
+                   b.status
+             FROM bookings b JOIN farmers f ON f.farmer_id=b.farmer_id
+             LEFT JOIN deliveries d ON d.booking_id=b.booking_id
+             LEFT JOIN manure_types mt ON mt.manure_type_id=b.planned_manure_type_id
+             WHERE b.delivery_date=:date ORDER BY b.time_slot
+         """, {"date":date_str})
+
         except Exception as e:
             st.error(f"DB error: {e}"); sc = pd.DataFrame()
 
