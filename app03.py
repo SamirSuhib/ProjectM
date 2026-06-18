@@ -1322,7 +1322,7 @@ with tab5:
                 "Solid Level (t)": "{:.0f}",
                 "Solid Fill %": "{:.1f}",
             }
-        st.dataframe(fdf.style.apply(hl,axis=1), use_container_width=True, hide_index=True)
+        st.dataframe(fdf.style.apply(hl,axis=1).format(fmt), use_container_width=True, hide_index=True)
 
         fig,(ax1,ax2) = plt.subplots(2,1,figsize=(12,7),sharex=True)
         fig.patch.set_facecolor("#0f1a0f"); fig.subplots_adjust(hspace=0.35)
