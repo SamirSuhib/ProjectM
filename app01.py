@@ -3,7 +3,66 @@ import pandas as pd
 import matplotlib.dates as mdates
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import hashlib, io, os
+from datetime import date, timedelta
+from typing import Optional
+from supabase import create_client, Client
 
+# =============================================================================
+# DB SCHEMA MIGRATION (run once):
+#
+#   ALTER TABLE bookings
+#       ADD COLUMN IF NOT EXISTS transport_required BOOLEAN DEFAULT FALSE,
+#       ADD COLUMN IF NOT EXISTS assigned_truck     VARCHAR(10),
+#       ADD COLUMN IF NOT EXISTS assigned_worker    VARCHAR(50),
+#       ADD COLUMN IF NOT EXISTS trips_count        INTEGER DEFAULT 1,
+#       ADD COLUMN IF NOT EXISTS total_duration_min INTEGER DEFAULT 55,
+#       ADD COLUMN IF NOT EXISTS end_time_slot      VARCHAR(20),
+#       ADD COLUMN IF NOT EXISTS delivery_plan_id   INTEGER;
+#
+#   ALTER TABLE farmers
+#       ADD COLUMN IF NOT EXISTS phone   VARCHAR(30),
+#       ADD COLUMN IF NOT EXISTS address TEXT,
+#       ADD COLUMN IF NOT EXISTS email   VARCHAR(100),
+#       ADD COLUMN IF NOT EXISTS notes   TEXT,
+#       ADD COLUMN IF NOT EXISTS active  BOOLEAN DEFAULT TRUE;
+#
+#   CREATE TABLE IF NOT EXISTS delivery_plans (
+#       plan_id            SERIAL PRIMARY KEY,
+#       farmer_id          INTEGER NOT NULL REFERENCES farmers(farmer_id),
+#       manure_form        VARCHAR(10) NOT NULL,
+#       manure_type_id     INTEGER REFERENCES manure_types(manure_type_id),
+#       total_quantity     NUMERIC(10,2) NOT NULL,
+#       start_date         DATE NOT NULL,
+#       end_date           DATE NOT NULL,
+#       daily_quantity     NUMERIC(10,2),
+#       transport_required BOOLEAN DEFAULT FALSE,
+#       assigned_worker    VARCHAR(50),
+#       notes              TEXT,
+#       status             VARCHAR(20) DEFAULT 'active',
+#       created_at         TIMESTAMP DEFAULT NOW()
+#   );
+#
+#   ALTER TABLE bookings
+#       ADD CONSTRAINT fk_delivery_plan
+#       FOREIGN KEY (delivery_plan_id) REFERENCES delivery_plans(plan_id);
+# =============================================================================
+
+# =============================================================================
+# AUTHENTICATION
+# Set credentials via env vars or .streamlit/secrets.toml:
+#   ADMIN_USERNAME / ADMIN_PASSWORD_HASH   (sha256 hex)
+#   OPERATOR_USERNAME / OPERATOR_PASSWORD_HASH
+#
+# secrets.toml example:
+#   [auth]
+#   admin_user    = "admin"
+#   admin_hash    = "<sha256 of password>"
+#   operator_user = "operator"
+#   operator_hash = "<sha256 of password>"
+#
+# Get hash: python3 -c "import hashlib; print(hashlib.sha256(b'yourpassword').hexdigest())"
+# =============================================================================
 
 def _hash(pw: str) -> str:
     return hashlib.sha256(pw.encode()).hexdigest()
@@ -119,9 +178,7 @@ def login_page():
                 st.rerun()
             else:
                 st.error("Invalid username or password.")
-        st.markdown("<p style='text-align:center;color:#475569;font-size:0.75rem;margin-top:16px'>"
-                    "admin / admin123 &nbsp;·&nbsp; operator / plant2024</p>",
-                    unsafe_allow_html=True)
+
 
 if not st.session_state.get("authenticated"):
     login_page()
@@ -133,7 +190,144 @@ if not st.session_state.get("authenticated"):
 mpl.rcParams.update({"font.size":9,"axes.titlesize":11,"axes.labelsize":9,
                      "xtick.labelsize":8,"ytick.labelsize":8,"legend.fontsize":8})
 
-{}
+# =============================================================================
+# PLANT CONSTANTS
+# =============================================================================
+LIQUID_STORAGE_CAPACITY_M3  = 1900
+DAILY_LIQUID_OUTFLOW_M3     = 200
+LIQUID_INITIAL_STOCK_M3     = 500
+SOLID_STORAGE_CAPACITY_TONS = 2000
+DAILY_SOLID_OUTFLOW_TONS    = 200   # adjustable in sidebar
+SOLID_INITIAL_STOCK_TONS    = 0
+LIQUID_TRUCK_CAPACITY_M3    = 27
+SOLID_TRUCK_CAPACITY_TONS   = 27
+TRUCKS                      = {"liquid":"LKW1","solid":"LKW2"}
+WORKERS                     = ["Worker 1","Worker 2"]
+TRIP_DURATION_MIN           = 55
+TIME_SLOTS = [
+    "07:00-08:00","08:00-09:00","09:00-10:00","10:00-11:00",
+    "11:00-12:00","12:00-13:00","13:00-14:00","14:00-15:00",
+    "15:00-16:00","16:00-17:00","17:00-18:00","18:00-19:00",
+]
+
+# =============================================================================
+# DATABASE  (Supabase REST client — works on Streamlit Cloud, no port 5432)
+# =============================================================================
+@st.cache_resource
+def get_supabase() -> Client:
+    url = st.secrets["supabase"]["url"]
+    key = st.secrets["supabase"]["key"]
+    return create_client(url, key)
+
+# ---------------------------------------------------------------------------
+# The three helper functions below keep the same signatures as before so that
+# every other line in the app works without any changes.
+# They call Supabase's PostgREST RPC endpoint which accepts raw SQL via the
+# "pg_query" postgres function — OR we use the supabase-py query builder.
+#
+# Simplest universal approach: use supabase.rpc() with a raw-SQL postgres
+# function. We create that function once in Supabase SQL Editor (see README).
+# ---------------------------------------------------------------------------
+
+def _run_sql(query: str, params: dict = None):
+    """Execute any SQL via the run_sql Postgres function through Supabase RPC.
+    Safely inlines :param values directly into the SQL string before sending.
+    """
+    import re
+    sb = get_supabase()
+
+    if params:
+        def replacer(m):
+            key = m.group(1)
+            if key not in params:
+                return m.group(0)
+            val = params[key]
+            if val is None:
+                return "NULL"
+            if isinstance(val, bool):
+                return "TRUE" if val else "FALSE"
+            if isinstance(val, (int, float)):
+                return str(val)
+            escaped = str(val).replace("'", "''")
+            return f"\'{escaped}\'"
+        sql = re.sub(r":([a-zA-Z_][a-zA-Z0-9_]*)", replacer, query)
+    else:
+        sql = query
+
+    import re as _re
+    query_type = sql.strip().upper()[:6]
+    is_write = query_type in ('INSERT', 'UPDATE', 'DELETE')
+
+    if is_write:
+        result = sb.rpc("run_sql_write", {"query": sql}).execute()
+    else:
+        result = sb.rpc("run_sql", {"query": sql}).execute()
+    return result.data
+
+def fetch_df(q: str, p: dict = None) -> pd.DataFrame:
+    """Run SELECT query, return DataFrame."""
+    try:
+        rows = _run_sql(q, p)
+        if rows:
+            return pd.DataFrame(rows)
+        return pd.DataFrame()
+    except Exception as e:
+        raise RuntimeError(f"DB error: {e}")
+
+def exec_one(q: str, p: dict = None, fetchone: bool = False):
+    """Run INSERT / UPDATE / DELETE (optionally return first row)."""
+    try:
+        rows = _run_sql(q, p)
+        if fetchone:
+            # rows may be a list of dicts, a single dict, or wrapped jsonb
+            if isinstance(rows, list) and len(rows) > 0:
+                first = rows[0]
+                if isinstance(first, dict):
+                    return tuple(first.values())
+            elif isinstance(rows, dict):
+                return tuple(rows.values())
+        return None
+    except Exception as e:
+        raise RuntimeError(f"DB error: {e}")
+
+def scalar(q: str, p: dict = None):
+    """Run a query that returns a single value."""
+    try:
+        rows = _run_sql(q, p)
+        if rows:
+            return list(rows[0].values())[0]
+        return None
+    except Exception as e:
+        raise RuntimeError(f"DB error: {e}")
+
+# =============================================================================
+# STORAGE HELPERS — single source of truth, used by all tabs
+# =============================================================================
+
+# =============================================================================
+# STORAGE HELPERS — single DB fetch, all calculations in memory
+# =============================================================================
+
+@st.cache_data(ttl=30)  # cache for 30 seconds — refreshes after any booking change
+def _fetch_booked_schedule() -> dict:
+    """
+    Fetch ALL booked deliveries in one query, return as dict:
+      { (date_str, 'liquid'): total_m3, (date_str, 'solid'): total_t, ... }
+    """
+    try:
+        df = fetch_df("""
+            SELECT delivery_date::text AS d, manure_form, COALESCE(SUM(expected_tons),0) AS qty
+            FROM bookings
+            WHERE status='booked'
+            GROUP BY delivery_date, manure_form
+            ORDER BY delivery_date
+        """)
+        result = {}
+        for _, row in df.iterrows():
+            result[(row["d"], row["manure_form"])] = float(row["qty"])
+        return result
+    except Exception:
+        return {}
 
 
 def _level_on_date(target: date, form: str,
@@ -156,7 +350,45 @@ def _level_on_date(target: date, form: str,
         d_str = cur.strftime("%Y-%m-%d")
         total_in += schedule.get((d_str, form), 0.0)
         if extra_date and d_str == extra_date:
- 
+            total_in += extra_qty
+        cur += timedelta(days=1)
+
+    return initial + total_in - (outflow * days)
+
+
+def storage_ok(target: date, qty: float, form: str,
+               schedule: dict = None) -> tuple:
+    """
+    Returns (feasible, worst_level, available_on_target, first_overflow_date).
+    - available_on_target = space free on the target date BEFORE this booking
+    - Scans target → target+60 with the extra qty to find any future overflow
+    - Also scans today → target-1 to detect pre-existing overflows from existing bookings
+    """
+    if schedule is None:
+        schedule = _fetch_booked_schedule()
+    cap       = LIQUID_STORAGE_CAPACITY_M3 if form == "liquid" else SOLID_STORAGE_CAPACITY_TONS
+    target_ds = target.strftime("%Y-%m-%d")
+    today     = date.today()
+
+    before    = _level_on_date(target, form, schedule)
+    available = max(0.0, cap - before)
+
+    first_overflow = None
+    worst_level    = -999999.0
+
+    # Check from today forward (includes days before target) to catch pre-existing overflow
+    horizon_end = target + timedelta(days=60)
+    cur = today
+    while cur <= horizon_end:
+        lv = _level_on_date(cur, form, schedule,
+                            extra_date=target_ds, extra_qty=qty)
+        if lv > worst_level:
+            worst_level = lv
+        if lv > cap and first_overflow is None:
+            first_overflow = cur.strftime("%Y-%m-%d")
+        cur += timedelta(days=1)
+
+    return (first_overflow is None, worst_level, available, first_overflow)
 
 
 def any_future_overflow(form: str, horizon: int = 60,
@@ -458,6 +690,45 @@ st.markdown("""
                                 text-transform: uppercase; }
 [data-testid="stSidebar"] hr { border-color: #1e293b !important; margin: 12px 0 !important; }
 
+/* ── Sidebar collapse/expand toggle button ──────────────────────────────── */
+[data-testid="stSidebarCollapsedControl"] {
+    background: #1e293b !important;
+    border: 1px solid #334155 !important;
+    border-radius: 50% !important;
+    width: 36px !important;
+    height: 36px !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4) !important;
+    transition: all 0.2s !important;
+    position: relative !important;
+}
+[data-testid="stSidebarCollapsedControl"]:hover {
+    background: #22c55e !important;
+    border-color: #22c55e !important;
+}
+/* Hide the material icon text by making it transparent and zero size */
+[data-testid="stSidebarCollapsedControl"] span {
+    font-size: 0 !important;
+    color: transparent !important;
+}
+[data-testid="stSidebarCollapsedControl"] button {
+    font-size: 0 !important;
+    color: transparent !important;
+}
+/* Replace with ☰ using pseudo on the inner button */
+[data-testid="stSidebarCollapsedControl"] button::after {
+    content: "☰" !important;
+    font-size: 16px !important;
+    color: #94a3b8 !important;
+    font-family: Arial, sans-serif !important;
+    position: absolute !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) !important;
+}
+[data-testid="stSidebarCollapsedControl"]:hover button::after {
+    color: #ffffff !important;
+}
+
 /* ── Sidebar metrics ────────────────────────────────────────────────────── */
 [data-testid="stSidebar"] [data-testid="stMetric"] {
     background: #1e293b !important;
@@ -465,8 +736,103 @@ st.markdown("""
     border-radius: 10px !important;
     padding: 10px 14px !important;
     margin-bottom: 6px !important;
+}
+[data-testid="stSidebar"] [data-testid="stMetricLabel"] { color: #64748b !important; font-size: 0.72rem !important; }
+[data-testid="stSidebar"] [data-testid="stMetricValue"] { color: #f1f5f9 !important; font-size: 1.1rem !important; font-weight: 700 !important; }
 
+/* ── Main metrics ────────────────────────────────────────────────────────── */
+[data-testid="stMetric"] {
+    background: #1e293b !important;
+    border: 1px solid #334155 !important;
+    border-radius: 12px !important;
+    padding: 16px 20px !important;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+[data-testid="stMetric"]:hover {
+    border-color: #22c55e !important;
+    box-shadow: 0 0 0 1px rgba(34,197,94,0.2) !important;
+}
+[data-testid="stMetricLabel"] { color: #64748b !important; font-size: 0.76rem !important;
+                                  font-weight: 500 !important; letter-spacing: 0.03em; text-transform: uppercase; }
+[data-testid="stMetricValue"] { color: #f1f5f9 !important; font-size: 1.5rem !important; font-weight: 700 !important; }
+[data-testid="stMetricDelta"]  { font-size: 0.78rem !important; }
 
+/* ── Typography ─────────────────────────────────────────────────────────── */
+h1 { color: #f1f5f9 !important; font-size: 1.6rem !important; font-weight: 700 !important; }
+h2 { color: #e2e8f0 !important; font-size: 1.2rem !important; font-weight: 600 !important; }
+h3 { color: #cbd5e1 !important; font-size: 1rem !important; font-weight: 600 !important; }
+h4 { color: #94a3b8 !important; font-size: 0.85rem !important; font-weight: 600 !important;
+     text-transform: uppercase; letter-spacing: 0.05em; }
+p, label, .stMarkdown, span { color: #94a3b8 !important; font-size: 0.87rem !important; }
+strong { color: #e2e8f0 !important; }
+hr { border-color: #1e293b !important; margin: 16px 0 !important; }
+
+/* ── Tabs ────────────────────────────────────────────────────────────────── */
+[data-baseweb="tab-list"] {
+    background: #1e293b !important;
+    border-radius: 12px !important;
+    padding: 4px !important;
+    gap: 2px !important;
+    border: 1px solid #334155 !important;
+}
+[data-baseweb="tab"] {
+    border-radius: 8px !important;
+    padding: 8px 18px !important;
+    color: #64748b !important;
+    font-weight: 500 !important;
+    font-size: 0.82rem !important;
+    transition: all 0.15s !important;
+}
+[data-baseweb="tab"]:hover { color: #94a3b8 !important; background: #334155 !important; }
+[aria-selected="true"] {
+    background: linear-gradient(135deg, #166534, #15803d) !important;
+    color: #dcfce7 !important; font-weight: 600 !important;
+    box-shadow: 0 2px 8px rgba(22,101,52,0.4) !important;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+[data-testid="baseButton-primary"] {
+    background: linear-gradient(135deg, #16a34a, #15803d) !important;
+    border: none !important; border-radius: 8px !important;
+    color: #fff !important; font-weight: 600 !important; font-size: 0.85rem !important;
+    box-shadow: 0 2px 8px rgba(22,163,74,0.35) !important;
+    transition: all 0.15s !important;
+}
+[data-testid="baseButton-primary"]:hover {
+    background: linear-gradient(135deg, #22c55e, #16a34a) !important;
+    box-shadow: 0 4px 14px rgba(22,163,74,0.45) !important;
+    transform: translateY(-1px) !important;
+}
+[data-testid="baseButton-primary"]:disabled {
+    background: #1e293b !important;
+    color: #475569 !important; box-shadow: none !important;
+    transform: none !important; cursor: not-allowed !important;
+}
+[data-testid="baseButton-secondary"] {
+    background: transparent !important;
+    border: 1px solid #334155 !important; border-radius: 8px !important;
+    color: #94a3b8 !important; font-weight: 500 !important;
+    transition: all 0.15s !important;
+}
+[data-testid="baseButton-secondary"]:hover {
+    border-color: #22c55e !important; color: #22c55e !important;
+}
+
+/* ── Form inputs ─────────────────────────────────────────────────────────── */
+[data-testid="stTextInput"] > div > div > input,
+[data-testid="stNumberInput"] input,
+[data-testid="stTextArea"] textarea {
+    background: #1e293b !important; color: #f1f5f9 !important;
+    border: 1px solid #334155 !important; border-radius: 8px !important;
+    font-size: 0.87rem !important; transition: border-color 0.2s, box-shadow 0.2s !important;
+}
+[data-testid="stTextInput"] > div > div > input:focus,
+[data-testid="stNumberInput"] input:focus,
+[data-testid="stTextArea"] textarea:focus {
+    border-color: #22c55e !important;
+    box-shadow: 0 0 0 3px rgba(34,197,94,0.12) !important;
+    outline: none !important;
+}
 
 /* ── Selects / Dropdowns ─────────────────────────────────────────────────── */
 [data-baseweb="select"] > div {
@@ -571,6 +937,27 @@ st.markdown("""
 # =============================================================================
 # SIDEBAR
 # =============================================================================
+# Inject JS to replace the keyboard_double_arr icon with a hamburger symbol
+st.markdown("""
+<script>
+function fixSidebarButton() {
+    const btns = window.parent.document.querySelectorAll('[data-testid="stSidebarCollapsedControl"] button');
+    btns.forEach(btn => {
+        btn.innerHTML = '&#9776;';
+        btn.style.fontSize = '18px';
+        btn.style.color = '#94a3b8';
+        btn.style.background = 'none';
+        btn.style.border = 'none';
+        btn.style.cursor = 'pointer';
+    });
+}
+// Run on load and watch for DOM changes
+fixSidebarButton();
+const observer = new MutationObserver(fixSidebarButton);
+observer.observe(window.parent.document.body, { childList: true, subtree: true });
+</script>
+""", unsafe_allow_html=True)
+
 with st.sidebar:
     uname = st.session_state.get('username','?')
     role  = st.session_state.get('role','operator')
@@ -619,11 +1006,16 @@ st.markdown(
     '<p class="app-sub">Biomethane Plant \u2014 Logistics & Delivery Management</p>'
     '</div></div></div>', unsafe_allow_html=True)
 
-hc1, hc2 = st.columns([1, 3])
+hc1, hc2, hc3 = st.columns([1, 3, 0.3])
 with hc1:
     selected_date = st.date_input('Working date', key='shared_date', label_visibility='collapsed')
     date_str      = selected_date.strftime('%Y-%m-%d')
     st.markdown(f"<p style='font-size:.75rem;color:#475569;margin-top:-8px'>\U0001f4c5 {selected_date.strftime('%A, %d %B %Y')}</p>", unsafe_allow_html=True)
+with hc3:
+    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+    if st.button("🔄", key="global_refresh", help="Refresh all data"):
+        _fetch_booked_schedule.clear()
+        st.rerun()
 with hc2:
     try:
         ln  = max(0, projected_liquid_level(selected_date))
@@ -651,6 +1043,32 @@ with hc2:
     except Exception:
         pass
 
+
+# Inject JS to replace the keyboard_double_arr text with ☰
+st.markdown("""
+<script>
+function fixSidebarBtn() {
+    const btns = window.parent.document.querySelectorAll('[data-testid="stSidebarCollapsedControl"] button');
+    btns.forEach(btn => {
+        const spans = btn.querySelectorAll('span');
+        spans.forEach(s => {
+            if (s.innerText && s.innerText.includes('keyboard')) {
+                s.innerText = '☰';
+                s.style.fontSize = '18px';
+                s.style.fontFamily = 'Arial, sans-serif';
+                s.style.color = '#94a3b8';
+            }
+        });
+    });
+}
+// Run on load and observe for changes
+fixSidebarBtn();
+setTimeout(fixSidebarBtn, 500);
+setTimeout(fixSidebarBtn, 1500);
+const observer = new MutationObserver(fixSidebarBtn);
+observer.observe(window.parent.document.body, { childList: true, subtree: true });
+</script>
+""", unsafe_allow_html=True)
 
 tab1,tab2,tab3,tab4,tab5,tab6,tab7,tab8 = st.tabs([
     "📋 Book Slot","🚛 Record Delivery","📆 Daily Schedule","🚚 Truck Calendar",
@@ -840,15 +1258,35 @@ with tab2:
     st.subheader("🚛 Record Delivery or Cancel Booking")
     try:
         ob = fetch_df("""
-            SELECT b.booking_id, f.name AS farmer, b.delivery_date, b.time_slot,
-                   b.expected_tons, b.manure_form,
+            SELECT b.booking_id AS "ID", f.name AS farmer,
+                   b.delivery_date, b.time_slot,
+                   b.manure_form, mt.name AS planned_type, b.expected_tons,
                    COALESCE(b.assigned_truck,'own') AS truck,
                    COALESCE(b.assigned_worker,'—')  AS worker,
-                   mt.name AS planned_type, b.status
+                   b.status
             FROM bookings b JOIN farmers f ON f.farmer_id=b.farmer_id
             LEFT JOIN manure_types mt ON mt.manure_type_id=b.planned_manure_type_id
             WHERE b.status='booked' ORDER BY b.delivery_date, b.time_slot
         """)
+        # keep booking_id as numeric column for the selectbox (hidden from display)
+        ob["booking_id"] = ob["ID"]
+        ob_display = ob[
+                [
+                     "ID",
+                     "farmer",
+                     "manure_form",
+                     "planned_type",
+                     "expected_tons",
+                     "delivery_date",
+                     "time_slot",
+                     "truck",
+                     "worker",
+                     "status"
+                    ]
+                ].rename(columns={
+                "ID": "Booking ID"
+             })
+
         mtd = fetch_df("SELECT manure_type_id,name FROM manure_types ORDER BY name")
     except Exception as e:
         st.error(f"DB error: {e}"); ob = pd.DataFrame(); mtd = pd.DataFrame()
@@ -856,7 +1294,7 @@ with tab2:
     if ob.empty:
         st.info("📭 No open bookings.")
     else:
-        st.dataframe(ob, use_container_width=True, hide_index=True)
+        st.dataframe(ob_display, use_container_width=True, hide_index=True)
         mm2 = dict(zip(mtd["name"], mtd["manure_type_id"]))
         bids= ob["booking_id"].tolist()
         st.markdown("#### ✅ Record a Delivery")
@@ -889,25 +1327,42 @@ with tab3:
     st.subheader(f"📆 Daily Schedule — {date_str}")
     try:
         sc = fetch_df("""
-            SELECT b.booking_id, b.time_slot, f.name AS farmer,
+            SELECT b.booking_id, f.name AS farmer,
                    b.manure_form, mt.name AS type,
                    b.expected_tons, COALESCE(d.quantity_tons,0) AS actual,
-                   COALESCE(b.transport_required,FALSE)        AS transport,
-                   COALESCE(b.assigned_truck,'own')            AS truck,
-                   COALESCE(b.assigned_worker,'—')             AS worker,
-                   COALESCE(b.trips_count,1)                   AS trips,
+                   b.time_slot, COALESCE(b.trips_count,1)       AS trips,
+                   COALESCE(b.assigned_truck,'own')             AS truck,
+                   COALESCE(b.assigned_worker,'—')              AS worker,
+                   COALESCE(b.transport_required,FALSE)         AS transport,
                    b.status
-            FROM bookings b JOIN farmers f ON f.farmer_id=b.farmer_id
-            LEFT JOIN deliveries d ON d.booking_id=b.booking_id
-            LEFT JOIN manure_types mt ON mt.manure_type_id=b.planned_manure_type_id
-            WHERE b.delivery_date=:date ORDER BY b.time_slot
-        """, {"date":date_str})
+             FROM bookings b JOIN farmers f ON f.farmer_id=b.farmer_id
+             LEFT JOIN deliveries d ON d.booking_id=b.booking_id
+             LEFT JOIN manure_types mt ON mt.manure_type_id=b.planned_manure_type_id
+             WHERE b.delivery_date=:date ORDER BY b.time_slot
+         """, {"date":date_str})
     except Exception as e:
         st.error(f"DB error: {e}"); sc = pd.DataFrame()
 
     if sc.empty:
         st.info(f"📭 No bookings for {date_str}.")
     else:
+        # Force column order
+        sc = sc[
+            [
+                "booking_id",
+                "farmer",
+                "manure_form",
+                "type",
+                "expected_tons",
+                "actual",
+                "time_slot",
+                "trips",
+                "truck",
+                "worker",
+                "transport",
+                "status",
+             ]
+        ]
         st.dataframe(sc, use_container_width=True, hide_index=True)
         liq = sc[sc["manure_form"]=="liquid"]["expected_tons"].sum()
         sol = sc[sc["manure_form"]=="solid"]["expected_tons"].sum()
@@ -918,7 +1373,7 @@ with tab3:
         m4.metric("Own transport", sc[sc["transport"]==False].shape[0])
     st.download_button("⬇️ CSV", data=sc.to_csv(index=False).encode() if not sc.empty else b"",
                        file_name=f"schedule_{date_str}.csv", mime="text/csv", key="dl_s3")
-
+  
 # ── TAB 4 — TRUCK CALENDAR ───────────────────────────────────────────────────
 with tab4:
     st.subheader(f"🚚 Truck Calendar — {date_str}")
@@ -1340,6 +1795,67 @@ with tab7:
                         st.success(msg); _fetch_booked_schedule.clear(); st.rerun()
                     except Exception as ex: st.error(f"❌ {ex}")
 
+    with pv:
+        try:
+            plans=fetch_df("""
+                SELECT dp.plan_id, f.name AS farmer, dp.manure_form,
+                       mt.name AS type, dp.total_quantity,
+                       dp.start_date, dp.end_date, dp.status,
+                       COUNT(b.booking_id) AS bookings,
+                       COALESCE(SUM(b.expected_tons),0) AS booked,
+                       COALESCE(SUM(CASE WHEN b.status='completed'
+                                    THEN b.expected_tons ELSE 0 END),0) AS delivered
+                FROM delivery_plans dp JOIN farmers f ON f.farmer_id=dp.farmer_id
+                LEFT JOIN manure_types mt ON mt.manure_type_id=dp.manure_type_id
+                LEFT JOIN bookings b ON b.delivery_plan_id=dp.plan_id
+                GROUP BY dp.plan_id,f.name,dp.manure_form,mt.name,
+                         dp.total_quantity,dp.start_date,dp.end_date,dp.status
+                ORDER BY dp.plan_id DESC""")
+        except Exception as e:
+            st.error(f"DB error: {e}"); plans=pd.DataFrame()
+
+        if plans.empty: st.info("No plans yet.")
+        else:
+            st.dataframe(plans,use_container_width=True,hide_index=True)
+            st.divider()
+            st.markdown("#### 🗑️ Delete a Plan")
+            all_plan_ids = plans["plan_id"].tolist()
+            del_pid = st.selectbox("Select plan to delete", all_plan_ids, key="del_pid",
+                                   format_func=lambda x: f"Plan #{x} — "
+                                   f"{plans[plans['plan_id']==x]['farmer'].values[0]} | "
+                                   f"{plans[plans['plan_id']==x]['status'].values[0]}")
+            sel_plan = plans[plans["plan_id"]==del_pid].iloc[0]
+            dc1,dc2 = st.columns(2)
+            with dc1:
+                st.caption(f"Status: **{sel_plan['status']}** | "
+                           f"Bookings: {sel_plan['bookings']} | "
+                           f"Delivered: {sel_plan['delivered']:.0f}")
+            with dc2:
+                del_future_only = st.checkbox("Delete future bookings only (keep past/completed)",
+                                              value=True, key="del_future_only")
+            confirm_del = st.checkbox(f"✅ I confirm: permanently delete Plan #{del_pid} "
+                                      f"and its bookings", key="confirm_del")
+            if st.button("🗑️ Delete Plan Permanently", key="del_plan_btn",
+                         disabled=not confirm_del, type="primary"):
+                try:
+                    if del_future_only:
+                        exec_one("""DELETE FROM bookings
+                                    WHERE delivery_plan_id=:id
+                                      AND status='booked'
+                                      AND delivery_date >= CURRENT_DATE""",
+                                 {"id": int(del_pid)})
+                    else:
+                        exec_one("DELETE FROM bookings WHERE delivery_plan_id=:id",
+                                 {"id": int(del_pid)})
+                    exec_one("DELETE FROM delivery_plans WHERE plan_id=:id",
+                             {"id": int(del_pid)})
+                    st.success(f"✅ Plan #{del_pid} and its bookings permanently deleted.")
+                    _fetch_booked_schedule.clear(); st.rerun()
+                except Exception as e:
+                    st.error(f"❌ {e} — Make sure no completed deliveries reference this plan, "
+                             f"or uncheck 'Delete future only' to delete all bookings first.")
+
+# ── TAB 8 — MANAGE FARMERS ───────────────────────────────────────────────────
 with tab8:
     st.subheader("👨‍🌾 Manage Farmers")
     fa,fl=st.tabs(["➕ Add Farmer","📋 Farmer List"])
@@ -1385,4 +1901,52 @@ with tab8:
                         st.balloons()
                 except Exception as e: st.error(f"❌ {e}")
 
+    with fl:
+        try:
+            af=fetch_df("""
+                SELECT f.farmer_id,f.name,
+                       COALESCE(f.phone,'—') AS phone,COALESCE(f.email,'—') AS email,
+                       COALESCE(f.address,'—') AS address,COALESCE(f.active,TRUE) AS active,
+                       COUNT(b.booking_id) AS bookings,
+                       COALESCE(SUM(CASE WHEN b.status='completed'
+                                    THEN b.expected_tons ELSE 0 END),0) AS delivered,
+                       MAX(b.delivery_date) AS last_booking
+                FROM farmers f LEFT JOIN bookings b ON b.farmer_id=f.farmer_id
+                GROUP BY f.farmer_id,f.name,f.phone,f.email,f.address,f.active
+                ORDER BY f.name""")
+        except Exception:
+            try:
+                af=fetch_df("""
+                    SELECT f.farmer_id,f.name,'—' AS phone,'—' AS email,
+                           '—' AS address,TRUE AS active,
+                           COUNT(b.booking_id) AS bookings,
+                           COALESCE(SUM(CASE WHEN b.status='completed'
+                                        THEN b.expected_tons ELSE 0 END),0) AS delivered,
+                           MAX(b.delivery_date) AS last_booking
+                    FROM farmers f LEFT JOIN bookings b ON b.farmer_id=f.farmer_id
+                    GROUP BY f.farmer_id,f.name ORDER BY f.name""")
+            except Exception as ex: st.error(f"DB error: {ex}"); af=pd.DataFrame()
 
+        if af.empty: st.info("No farmers yet.")
+        else:
+            m1,m2,m3=st.columns(3)
+            m1.metric("Total",len(af))
+            m2.metric("Active",int(af["active"].sum()) if "active" in af.columns else "?")
+            m3.metric("Total delivered",f"{af['delivered'].sum():.0f} t/m³")
+            st.dataframe(af,use_container_width=True,hide_index=True)
+            st.divider()
+            sel=st.selectbox("Select farmer",af["name"].tolist(),key="af_sel")
+            er=af[af["name"]==sel].iloc[0]
+            is_a=bool(er.get("active",True))
+            ce1,ce2=st.columns(2)
+            with ce1:
+                if st.button("🚫 Deactivate" if is_a else "✅ Reactivate",key="af_tog"):
+                    try:
+                        exec_one("UPDATE farmers SET active=:v WHERE farmer_id=:id",
+                                 {"v":not is_a,"id":int(er["farmer_id"])})
+                        st.success(f"✅ {sel} {'deactivated' if is_a else 'reactivated'}")
+                        st.rerun()
+                    except Exception as e: st.error(f"❌ {e}")
+            with ce2:
+                st.caption(f"{'🟢 Active' if is_a else '🔴 Inactive'} · "
+                           f"{er['bookings']} bookings · {er['delivered']:.0f} t/m³ delivered")
