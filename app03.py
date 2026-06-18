@@ -1329,6 +1329,23 @@ with tab3:
     if sc.empty:
         st.info(f"📭 No bookings for {date_str}.")
     else:
+        # Force column order
+        sc = sc[
+            [
+                "booking_id",
+                "farmer",
+                "manure_form",
+                "type",
+                "expected_tons",
+                "actual",
+                "time_slot",
+                "trips",
+                "truck",
+                "worker",
+                "transport",
+                "status",
+             ]
+        ]
         st.dataframe(sc, use_container_width=True, hide_index=True)
         liq = sc[sc["manure_form"]=="liquid"]["expected_tons"].sum()
         sol = sc[sc["manure_form"]=="solid"]["expected_tons"].sum()
@@ -1339,7 +1356,7 @@ with tab3:
         m4.metric("Own transport", sc[sc["transport"]==False].shape[0])
     st.download_button("⬇️ CSV", data=sc.to_csv(index=False).encode() if not sc.empty else b"",
                        file_name=f"schedule_{date_str}.csv", mime="text/csv", key="dl_s3")
-
+  
 # ── TAB 4 — TRUCK CALENDAR ───────────────────────────────────────────────────
 with tab4:
     st.subheader(f"🚚 Truck Calendar — {date_str}")
