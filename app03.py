@@ -1305,6 +1305,7 @@ with tab5:
             f3.metric("Today Solid", f"{r['Solid Level (t)']:.0f} t",
                       delta=f"{r['Solid Fill %']:.1f}%")
             f4.metric("Free Solid",  f"{SOLID_STORAGE_CAPACITY_TONS-r['Solid Level (t)']:.0f} t")
+            
         def hl(row):
             ls = str(row.get("Liquid Status",""))
             ss = str(row.get("Solid Status",""))
@@ -1334,12 +1335,12 @@ with tab5:
             hide_index=True
         )
 
-        def hl(row):
-    ls = str(row.get("Liquid Status",""))
-    ss = str(row.get("Solid Status",""))
-    if "OVERFLOW" in ls or "OVERFLOW" in ss: return ["background-color:#3d1a1a"]*len(row)
-    if "HIGH"     in ls or "HIGH"     in ss: return ["background-color:#2d2a1a"]*len(row)
-    return [""]*len(row)
+            def hl(row):
+            ls = str(row.get("Liquid Status",""))
+            ss = str(row.get("Solid Status",""))
+            if "OVERFLOW" in ls or "OVERFLOW" in ss: return ["background-color:#3d1a1a"]*len(row)
+            if "HIGH"     in ls or "HIGH"     in ss: return ["background-color:#2d2a1a"]*len(row)
+            return [""]*len(row)
 
 
         fig,(ax1,ax2) = plt.subplots(2,1,figsize=(12,7),sharex=True)
