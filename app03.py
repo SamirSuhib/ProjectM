@@ -1306,12 +1306,12 @@ with tab5:
                       delta=f"{r['Solid Fill %']:.1f}%")
             f4.metric("Free Solid",  f"{SOLID_STORAGE_CAPACITY_TONS-r['Solid Level (t)']:.0f} t")
             
-            def hl(row):
-            ls = str(row.get("Liquid Status",""))
-            ss = str(row.get("Solid Status",""))
-            if "OVERFLOW" in ls or "OVERFLOW" in ss: return ["background-color:#3d1a1a"]*len(row)
-            if "HIGH"     in ls or "HIGH"     in ss: return ["background-color:#2d2a1a"]*len(row)
-            return [""]*len(row)
+        def hl(row):
+                ls = str(row.get("Liquid Status",""))
+                ss = str(row.get("Solid Status",""))
+                if "OVERFLOW" in ls or "OVERFLOW" in ss: return ["background-color:#3d1a1a"]*len(row)
+                if "HIGH"     in ls or "HIGH"     in ss: return ["background-color:#2d2a1a"]*len(row)
+                return [""]*len(row)
         st.dataframe(fdf.style.apply(hl,axis=1), use_container_width=True, hide_index=True)
 
         fig,(ax1,ax2) = plt.subplots(2,1,figsize=(12,7),sharex=True)
