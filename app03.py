@@ -1335,14 +1335,6 @@ with tab5:
             hide_index=True
         )
 
-            def hl(row):
-            ls = str(row.get("Liquid Status",""))
-            ss = str(row.get("Solid Status",""))
-            if "OVERFLOW" in ls or "OVERFLOW" in ss: return ["background-color:#3d1a1a"]*len(row)
-            if "HIGH"     in ls or "HIGH"     in ss: return ["background-color:#2d2a1a"]*len(row)
-            return [""]*len(row)
-
-
         fig,(ax1,ax2) = plt.subplots(2,1,figsize=(12,7),sharex=True)
         fig.patch.set_facecolor("#0f1a0f"); fig.subplots_adjust(hspace=0.35)
         x = list(range(len(fdf)))
