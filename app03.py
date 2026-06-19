@@ -160,7 +160,7 @@ mpl.rcParams.update({"font.size":9,"axes.titlesize":11,"axes.labelsize":9,
 # =============================================================================
 LIQUID_STORAGE_CAPACITY_M3  = 1900
 DAILY_LIQUID_OUTFLOW_M3     = 200
-LIQUID_INITIAL_STOCK_M3     = 500
+LIQUID_INITIAL_STOCK_M3     = 0
 SOLID_STORAGE_CAPACITY_TONS = 2000
 DAILY_SOLID_OUTFLOW_TONS    = 200
 SOLID_INITIAL_STOCK_TONS    = 0
@@ -849,7 +849,7 @@ with st.sidebar:
     st.metric('Solid storage',     f'{SOLID_STORAGE_CAPACITY_TONS} t')
     st.markdown('<p class="section-title" style="margin-top:16px">Current Stock</p>', unsafe_allow_html=True)
     LIQUID_INITIAL_STOCK_M3  = st.number_input('Liquid level now (m\u00b3)',
-        min_value=0, max_value=LIQUID_STORAGE_CAPACITY_M3,  value=500, step=10, key='liq_s')
+        min_value=0, max_value=LIQUID_STORAGE_CAPACITY_M3,  value=0, step=10, key='liq_s')
     SOLID_INITIAL_STOCK_TONS = st.number_input('Solid level now (t)',
         min_value=0, max_value=SOLID_STORAGE_CAPACITY_TONS, value=0,   step=10, key='sol_s')
     st.markdown('<p class="section-title" style="margin-top:16px">Daily Outflow</p>', unsafe_allow_html=True)
