@@ -1743,6 +1743,22 @@ with tab7:
 
         if plans.empty: st.info("No plans yet.")
         else:
+            plans = plans[
+              [
+            "plan_id",
+            "farmer",
+            "type",
+            "manure_form",
+            "total_quantity",
+            "delivered",
+            "booked",
+            "bookings",
+            "status",
+            "start_date",
+            "end_date",
+               ]
+            ]
+
             st.dataframe(plans,use_container_width=True,hide_index=True)
             st.divider()
             st.markdown("#### 🗑️ Delete a Plan")
