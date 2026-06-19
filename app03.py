@@ -272,27 +272,12 @@ def _fetch_booked_schedule() -> dict:
         return {}
 
 
-# =============================================================================
-# FIX 1: _build_level_series — start from min(today, earliest_relevant_date)
-# so that dates before today (e.g. past dates selected in Book Slot) are always
-# present in the returned dict, eliminating the KeyError on target_ds.
-# =============================================================================
-
 def _build_level_series(form: str, schedule: dict, horizon_end: date,
                          extra_date: str = None, extra_qty: float = 0.0) -> dict:
-    """
-    True day-by-day running simulation.
-    Starts from the earliest relevant date so past-date selections never
-    produce a KeyError when the caller looks up target_ds.
-    Floors level at 0 each day (tank cannot go negative).
-    Returns {date_str: level}.
-    """
     today   = date.today()
     outflow = DAILY_LIQUID_OUTFLOW_M3 if form == "liquid" else DAILY_SOLID_OUTFLOW_TONS
     level   = LIQUID_INITIAL_STOCK_M3  if form == "liquid" else SOLID_INITIAL_STOCK_TONS
 
-    # Determine the earliest date we need in the output so target_ds is
-    # always present even when the user selects a date before today.
     start = today
     if extra_date:
         try:
@@ -300,7 +285,6 @@ def _build_level_series(form: str, schedule: dict, horizon_end: date,
             start = min(start, extra_d)
         except ValueError:
             pass
-    # Also pull start back to horizon_end if horizon_end is before today
     start = min(start, horizon_end)
 
     levels = {}
@@ -329,15 +313,11 @@ def _level_on_date(target: date, form: str,
         except ValueError:
             pass
     levels = _build_level_series(form, schedule, horizon_end, extra_date, extra_qty)
-    # FIX 3: use .get() as safety net so missing keys return 0 instead of KeyError
     return levels.get(target.strftime("%Y-%m-%d"), 0.0)
 
 
 def storage_ok(target: date, qty: float, form: str,
                schedule: dict = None) -> tuple:
-    """
-    Returns (feasible, worst_level, available_on_target, first_overflow_date).
-    """
     if schedule is None:
         schedule = _fetch_booked_schedule()
     cap       = LIQUID_STORAGE_CAPACITY_M3 if form == "liquid" else SOLID_STORAGE_CAPACITY_TONS
@@ -345,7 +325,6 @@ def storage_ok(target: date, qty: float, form: str,
     today     = date.today()
 
     before_levels = _build_level_series(form, schedule, target)
-    # FIX 3: safe get instead of direct key access
     before        = before_levels.get(target_ds, 0.0)
     available     = max(0.0, cap - before)
 
@@ -355,10 +334,9 @@ def storage_ok(target: date, qty: float, form: str,
 
     first_overflow = None
     worst_level    = -999999.0
-    cur = min(today, target)   # scan from earliest relevant date
+    cur = min(today, target)
     while cur <= horizon_end:
         d_str = cur.strftime("%Y-%m-%d")
-        # FIX 3: safe get
         lv    = with_levels.get(d_str, 0.0)
         if lv > worst_level:
             worst_level = lv
@@ -928,7 +906,6 @@ with tab1:
             b_form  = st.selectbox("💧 Form",               ["liquid","solid"], key="b_form")
             b_unit  = "m³" if b_form=="liquid" else "t"
             cap_val = LIQUID_STORAGE_CAPACITY_M3 if b_form=="liquid" else SOLID_STORAGE_CAPACITY_TONS
-            # FIX: use .get() index [2] safely — storage_ok now handles past dates
             _avail  = max(0.0, storage_ok(b_date, 0.0, b_form)[2])
             b_qty   = st.number_input(
                 f"📦 Quantity ({b_unit})",
@@ -1078,7 +1055,6 @@ with tab1:
 with tab2:
     st.subheader("🚛 Record Delivery or Cancel Booking")
 
-    # FIX 2: always show fresh data — cleared after every action below
     try:
         ob = fetch_df("""
             SELECT b.booking_id AS "ID", f.name AS farmer, b.delivery_date,
@@ -1090,25 +1066,11 @@ with tab2:
             LEFT JOIN manure_types mt ON mt.manure_type_id=b.planned_manure_type_id
             WHERE b.status='booked' ORDER BY b.delivery_date, b.time_slot
         """)
-
-         # keep booking_id as numeric column for the selectbox (hidden from display)
         ob["booking_id"] = ob["ID"]
-        ob_display = ob[
-                [
-                     "ID",
-                     "farmer",
-                     "manure_form",
-                     "planned_type",
-                     "expected_tons",
-                     "delivery_date",
-                     "time_slot",
-                     "truck",
-                     "worker",
-                     "status"
-                    ]
-                ].rename(columns={
-                "ID": "Booking ID"
-             })
+        ob_display = ob[[
+            "ID","farmer","manure_form","planned_type",
+            "expected_tons","delivery_date","time_slot","truck","worker","status"
+        ]].rename(columns={"ID": "Booking ID"})
         mtd = fetch_df("SELECT manure_type_id,name FROM manure_types ORDER BY name")
     except Exception as e:
         st.error(f"DB error: {e}"); ob = pd.DataFrame(); mtd = pd.DataFrame()
@@ -1133,7 +1095,6 @@ with tab2:
                          {"bid":int(d_bid),"mid":int(mm2[d_mt]),"qty":float(d_qty)})
                 exec_one("UPDATE bookings SET status='completed' WHERE booking_id=:bid",
                          {"bid":int(d_bid)})
-                # FIX 2: clear cache so all tabs reflect the status change immediately
                 _fetch_booked_schedule.clear()
                 st.success(f"✅ Delivery recorded for booking #{d_bid}.")
                 st.rerun()
@@ -1147,7 +1108,6 @@ with tab2:
             try:
                 exec_one("UPDATE bookings SET status='cancelled' WHERE booking_id=:id",
                          {"id":int(cb)})
-                # FIX 2: clear cache on cancel too
                 _fetch_booked_schedule.clear()
                 st.success(f"✅ Booking #{cb} cancelled.")
                 st.rerun()
@@ -1158,7 +1118,6 @@ with tab2:
 with tab3:
     st.subheader(f"📆 Daily Schedule — {date_str}")
 
-    # Status filter so users can hide completed/cancelled rows if desired
     t3_col1, t3_col2 = st.columns([3, 1])
     with t3_col1:
         show_statuses = st.multiselect(
@@ -1175,10 +1134,8 @@ with tab3:
     if not show_statuses:
         st.info("Select at least one status to display.")
     else:
-        # Build the IN list and inline the date directly — avoids conflicts
-        # between f-string interpolation and the :param regex replacer in _run_sql.
         status_in   = "','".join(show_statuses)
-        safe_date   = date_str.replace("'", "")   # date_str is always YYYY-MM-DD, safe
+        safe_date   = date_str.replace("'", "")
         try:
             sc = fetch_df(f"""
                 SELECT b.booking_id, b.time_slot, f.name AS farmer,
@@ -1195,32 +1152,16 @@ with tab3:
                 WHERE b.delivery_date='{safe_date}' AND b.status IN ('{status_in}')
                 ORDER BY b.time_slot
             """)
-
         except Exception as e:
             st.error(f"DB error: {e}"); sc = pd.DataFrame()
 
         if sc.empty:
             st.info(f"📭 No bookings matching selected statuses for {date_str}.")
         else:
-            sc = sc[
-            [
-                "booking_id",
-                "farmer",
-                "manure_form",
-                "type",
-                "expected_tons",
-                "actual",
-                "time_slot",
-                "trips",
-                "truck",
-                "worker",
-                "transport",
-                "status"
-                     ]
-                ].rename(columns={
-                    "booking_id": "Booking ID"
-                })
-            
+            sc = sc[[
+                "booking_id","farmer","manure_form","type","expected_tons",
+                "actual","time_slot","trips","truck","worker","transport","status"
+            ]].rename(columns={"booking_id": "Booking ID"})
             st.dataframe(sc, use_container_width=True, hide_index=True)
             liq = sc[sc["manure_form"]=="liquid"]["expected_tons"].sum()
             sol = sc[sc["manure_form"]=="solid"]["expected_tons"].sum()
@@ -1305,23 +1246,23 @@ with tab5:
             f3.metric("Today Solid", f"{r['Solid Level (t)']:.0f} t",
                       delta=f"{r['Solid Fill %']:.1f}%")
             f4.metric("Free Solid",  f"{SOLID_STORAGE_CAPACITY_TONS-r['Solid Level (t)']:.0f} t")
-            
+
         def hl(row):
-                ls = str(row.get("Liquid Status",""))
-                ss = str(row.get("Solid Status",""))
-                if "OVERFLOW" in ls or "OVERFLOW" in ss: return ["background-color:#3d1a1a"]*len(row)
-                if "HIGH"     in ls or "HIGH"     in ss: return ["background-color:#2d2a1a"]*len(row)
-                return [""]*len(row)
+            ls = str(row.get("Liquid Status",""))
+            ss = str(row.get("Solid Status",""))
+            if "OVERFLOW" in ls or "OVERFLOW" in ss: return ["background-color:#3d1a1a"]*len(row)
+            if "HIGH"     in ls or "HIGH"     in ss: return ["background-color:#2d2a1a"]*len(row)
+            return [""]*len(row)
         fmt = {
-                "Liquid In (m³)": "{:.0f}",
-                "−Liquid Out (m³)": "{:.0f}",
-                "Liquid Level (m³)": "{:.0f}",
-                "Liquid Fill %": "{:.1f}",
-                "Solid In (t)": "{:.0f}",
-                "−Solid Out (t)": "{:.0f}",
-                "Solid Level (t)": "{:.0f}",
-                "Solid Fill %": "{:.1f}",
-            }
+            "Liquid In (m³)": "{:.0f}",
+            "−Liquid Out (m³)": "{:.0f}",
+            "Liquid Level (m³)": "{:.0f}",
+            "Liquid Fill %": "{:.1f}",
+            "Solid In (t)": "{:.0f}",
+            "−Solid Out (t)": "{:.0f}",
+            "Solid Level (t)": "{:.0f}",
+            "Solid Fill %": "{:.1f}",
+        }
         st.dataframe(fdf.style.apply(hl,axis=1).format(fmt), use_container_width=True, hide_index=True)
 
         fig,(ax1,ax2) = plt.subplots(2,1,figsize=(12,7),sharex=True)
@@ -1372,25 +1313,25 @@ with tab5:
 with tab6:
     st.subheader(f"📊 Capacity Report — {date_str}")
     try:
-            el = float(scalar("SELECT COALESCE(SUM(expected_tons),0) FROM bookings "
-                              "WHERE delivery_date=:d AND manure_form='liquid' AND status='booked'",
-                              {"d":date_str}) or 0)
-            es = float(scalar("SELECT COALESCE(SUM(expected_tons),0) FROM bookings "
-                              "WHERE delivery_date=:d AND manure_form='solid' AND status='booked'",
-                              {"d":date_str}) or 0)
-            # FIX: split "actually delivered" by manure form so completed
-            # deliveries stay visible per form instead of one combined figure.
-            al = float(scalar("SELECT COALESCE(SUM(de.quantity_tons),0) FROM deliveries de "
-                              "JOIN bookings b ON b.booking_id=de.booking_id "
-                              "WHERE b.delivery_date=:d AND b.manure_form='liquid'",
-                              {"d":date_str}) or 0)
-            as_ = float(scalar("SELECT COALESCE(SUM(de.quantity_tons),0) FROM deliveries de "
-                              "JOIN bookings b ON b.booking_id=de.booking_id "
-                              "WHERE b.delivery_date=:d AND b.manure_form='solid'",
-                              {"d":date_str}) or 0)
-            at = al + as_   # combined total, kept for the CSV/Excel export below
+        el = float(scalar("SELECT COALESCE(SUM(expected_tons),0) FROM bookings "
+                          "WHERE delivery_date=:d AND manure_form='liquid' AND status='booked'",
+                          {"d":date_str}) or 0)
+        es = float(scalar("SELECT COALESCE(SUM(expected_tons),0) FROM bookings "
+                          "WHERE delivery_date=:d AND manure_form='solid' AND status='booked'",
+                          {"d":date_str}) or 0)
+        # Actual delivered per form — reads from deliveries table so completed
+        # bookings remain visible instead of disappearing from the report.
+        al = float(scalar("SELECT COALESCE(SUM(de.quantity_tons),0) FROM deliveries de "
+                          "JOIN bookings b ON b.booking_id=de.booking_id "
+                          "WHERE b.delivery_date=:d AND b.manure_form='liquid'",
+                          {"d":date_str}) or 0)
+        as_ = float(scalar("SELECT COALESCE(SUM(de.quantity_tons),0) FROM deliveries de "
+                          "JOIN bookings b ON b.booking_id=de.booking_id "
+                          "WHERE b.delivery_date=:d AND b.manure_form='solid'",
+                          {"d":date_str}) or 0)
+        at = al + as_
     except Exception as e:
-            st.error(f"DB error: {e}"); el=es=al=as_=at=0.0
+        st.error(f"DB error: {e}"); el=es=al=as_=at=0.0
     try:
         ptr = int(scalar("SELECT COUNT(*) FROM bookings WHERE delivery_date=:d "
                          "AND transport_required=TRUE AND status!='cancelled'",{"d":date_str}) or 0)
@@ -1405,16 +1346,20 @@ with tab6:
     except Exception:
         ll=sl=0.0
 
+    # Row 1: planned (still booked) + current level
     r1,r2,r3,r4 = st.columns(4)
-    r1.metric("Liquid planned today", f"{el:.0f} m³",  delta=f"{el/LIQUID_STORAGE_CAPACITY_M3*100:.1f}%",
+    r1.metric("Liquid planned today", f"{el:.0f} m³",
+              delta=f"{el/LIQUID_STORAGE_CAPACITY_M3*100:.1f}%",
               help="Still-pending bookings (status='booked') for this date")
-    r2.metric("Liquid level",         f"{ll:.0f} m³",  delta=f"{ll/LIQUID_STORAGE_CAPACITY_M3*100:.1f}% full")
-    r3.metric("Solid planned today",  f"{es:.0f} t",   delta=f"{es/SOLID_STORAGE_CAPACITY_TONS*100:.1f}%",
+    r2.metric("Liquid level",         f"{ll:.0f} m³",
+              delta=f"{ll/LIQUID_STORAGE_CAPACITY_M3*100:.1f}% full")
+    r3.metric("Solid planned today",  f"{es:.0f} t",
+              delta=f"{es/SOLID_STORAGE_CAPACITY_TONS*100:.1f}%",
               help="Still-pending bookings (status='booked') for this date")
-    r4.metric("Solid level",          f"{sl:.0f} t",   delta=f"{sl/SOLID_STORAGE_CAPACITY_TONS*100:.1f}% full")
+    r4.metric("Solid level",          f"{sl:.0f} t",
+              delta=f"{sl/SOLID_STORAGE_CAPACITY_TONS*100:.1f}% full")
 
-    # FIX: new row — actual recorded deliveries per form, so this no longer
-    # disappears once a booking moves from 'booked' to 'completed'.
+    # Row 2: actual recorded deliveries — stays visible after booking completes
     d1,d2 = st.columns(2)
     d1.metric("Liquid delivered today", f"{al:.0f} m³",
               help="Actual quantity recorded via 'Record Delivery' for this date")
@@ -1428,47 +1373,64 @@ with tab6:
     t3.metric("Actually delivered (total)", f"{at:.0f} m³+t")
     st.caption(f"Daily liquid outflow: −{DAILY_LIQUID_OUTFLOW_M3} m³/day")
 
+    # Chart: 4 bars — Planned / Actual Delivered / Level / Capacity
     fig,axes = plt.subplots(1,2,figsize=(12,4))
     fig.patch.set_facecolor("#0f1a0f")
-    for ax,(title,inc,lev,cap,unit) in zip(axes,[
-        ("Liquid (Vorgrube)",el,ll,LIQUID_STORAGE_CAPACITY_M3,"m³"),
-        ("Solid Manure",     es,sl,SOLID_STORAGE_CAPACITY_TONS,"t")
+    for ax,(title,planned,actual,lev,cap,unit) in zip(axes,[
+        ("Liquid (Vorgrube)", el, al, ll, LIQUID_STORAGE_CAPACITY_M3,  "m³"),
+        ("Solid Manure",      es, as_, sl, SOLID_STORAGE_CAPACITY_TONS, "t")
     ]):
         ax.set_facecolor("#1a2d1a"); ax.tick_params(colors="#8ab885")
         ax.spines[:].set_color("#2d4a2d")
-        bars=ax.bar(["Incoming","Level","Capacity"],[inc,lev,cap],
-                    color=["#4CAF50","#81d4fa","#37474f"],alpha=0.85)
-        ax.axhline(cap,ls="--",color="#ef5350",lw=1.5)
+        bars = ax.bar(
+            ["Planned", "Actual Del.", "Level", "Capacity"],
+            [planned, actual, lev, cap],
+            color=["#4CAF50", "#66BB6A", "#81d4fa", "#37474f"],
+            alpha=0.85
+        )
+        ax.axhline(cap, ls="--", color="#ef5350", lw=1.5)
         for b in bars:
-            h=b.get_height()
-            ax.text(b.get_x()+b.get_width()/2,h+cap*0.01,
-                    f"{h:.0f}{unit}",ha="center",va="bottom",fontsize=8,color="#e8f5e8")
-        ax.set_title(f"{title} — {date_str}",color="#a8d5a2")
-        ax.set_ylabel(unit,color="#8ab885")
-        ax.grid(True,ls="--",lw=0.4,alpha=0.4,color="#2d4a2d")
-    plt.tight_layout(); st.pyplot(fig,use_container_width=True)
+            h = b.get_height()
+            ax.text(b.get_x()+b.get_width()/2, h+cap*0.01,
+                    f"{h:.0f}{unit}", ha="center", va="bottom",
+                    fontsize=8, color="#e8f5e8")
+        ax.set_title(f"{title} — {date_str}", color="#a8d5a2")
+        ax.set_ylabel(unit, color="#8ab885")
+        ax.grid(True, ls="--", lw=0.4, alpha=0.4, color="#2d4a2d")
+    plt.tight_layout(); st.pyplot(fig, use_container_width=True)
 
-    rdf = pd.DataFrame([{"date":date_str,
-        "liquid_incoming_m3":el,"liquid_level_m3":ll,"liquid_capacity_m3":LIQUID_STORAGE_CAPACITY_M3,
-        "liquid_outflow_m3":DAILY_LIQUID_OUTFLOW_M3,"solid_incoming_t":es,"solid_level_t":sl,
-        "solid_capacity_t":SOLID_STORAGE_CAPACITY_TONS,"actual_delivered":at,
-        "plant_lkw":ptr,"own_transport":otr}])
+    # Export — includes both planned and actual columns
+    rdf = pd.DataFrame([{"date": date_str,
+        "liquid_planned_m3":        el,
+        "liquid_actual_delivered_m3": al,
+        "liquid_level_m3":          ll,
+        "liquid_capacity_m3":       LIQUID_STORAGE_CAPACITY_M3,
+        "liquid_outflow_m3":        DAILY_LIQUID_OUTFLOW_M3,
+        "solid_planned_t":          es,
+        "solid_actual_delivered_t": as_,
+        "solid_level_t":            sl,
+        "solid_capacity_t":         SOLID_STORAGE_CAPACITY_TONS,
+        "actual_delivered_total":   at,
+        "plant_lkw":                ptr,
+        "own_transport":            otr}])
     st.dataframe(rdf, use_container_width=True)
-    dl1,dl2=st.columns(2)
+    dl1,dl2 = st.columns(2)
     with dl1:
-        st.download_button("⬇️ CSV",rdf.to_csv(index=False).encode(),
-                           file_name=f"capacity_{date_str}.csv",mime="text/csv",key="dl_c6")
+        st.download_button("⬇️ CSV", rdf.to_csv(index=False).encode(),
+                           file_name=f"capacity_{date_str}.csv",
+                           mime="text/csv", key="dl_c6")
     with dl2:
         try:
-            buf=io.BytesIO()
-            with pd.ExcelWriter(buf,engine="openpyxl") as w:
-                rdf.to_excel(w,index=False,sheet_name="Capacity")
-                build_forecast_df(14).to_excel(w,index=False,sheet_name="Forecast")
-            st.download_button("⬇️ Excel",buf.getvalue(),
+            buf = io.BytesIO()
+            with pd.ExcelWriter(buf, engine="openpyxl") as w:
+                rdf.to_excel(w, index=False, sheet_name="Capacity")
+                build_forecast_df(14).to_excel(w, index=False, sheet_name="Forecast")
+            st.download_button("⬇️ Excel", buf.getvalue(),
                                file_name=f"report_{date_str}.xlsx",
                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                key="dl_xl6")
-        except Exception as e: st.error(f"Excel error: {e}")
+        except Exception as e:
+            st.error(f"Excel error: {e}")
 
 # ── TAB 7 — DELIVERY PLANS ───────────────────────────────────────────────────
 with tab7:
