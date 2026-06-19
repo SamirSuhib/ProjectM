@@ -1371,18 +1371,26 @@ with tab5:
 # ── TAB 6 — CAPACITY REPORT ──────────────────────────────────────────────────
 with tab6:
     st.subheader(f"📊 Capacity Report — {date_str}")
-    try:
-        el = float(scalar("SELECT COALESCE(SUM(expected_tons),0) FROM bookings "
-                          "WHERE delivery_date=:d AND manure_form='liquid' AND status='booked'",
-                          {"d":date_str}) or 0)
-        es = float(scalar("SELECT COALESCE(SUM(expected_tons),0) FROM bookings "
-                          "WHERE delivery_date=:d AND manure_form='solid' AND status='booked'",
-                          {"d":date_str}) or 0)
-        at = float(scalar("SELECT COALESCE(SUM(d.quantity_tons),0) FROM deliveries d "
-                          "JOIN bookings b ON b.booking_id=d.booking_id WHERE b.delivery_date=:d",
-                          {"d":date_str}) or 0)
-    except Exception as e:
-        st.error(f"DB error: {e}"); el=es=at=0.0
+       try:
+            el = float(scalar("SELECT COALESCE(SUM(expected_tons),0) FROM bookings "
+                              "WHERE delivery_date=:d AND manure_form='liquid' AND status='booked'",
+                              {"d":date_str}) or 0)
+            es = float(scalar("SELECT COALESCE(SUM(expected_tons),0) FROM bookings "
+                              "WHERE delivery_date=:d AND manure_form='solid' AND status='booked'",
+                              {"d":date_str}) or 0)
+            # FIX: split "actually delivered" by manure form so completed
+            # deliveries stay visible per form instead of one combined figure.
+            al = float(scalar("SELECT COALESCE(SUM(de.quantity_tons),0) FROM deliveries de "
+                              "JOIN bookings b ON b.booking_id=de.booking_id "
+                              "WHERE b.delivery_date=:d AND b.manure_form='liquid'",
+                              {"d":date_str}) or 0)
+            as_ = float(scalar("SELECT COALESCE(SUM(de.quantity_tons),0) FROM deliveries de "
+                              "JOIN bookings b ON b.booking_id=de.booking_id "
+                              "WHERE b.delivery_date=:d AND b.manure_form='solid'",
+                              {"d":date_str}) or 0)
+            at = al + as_   # combined total, kept for the CSV/Excel export below
+        except Exception as e:
+            st.error(f"DB error: {e}"); el=es=al=as_=at=0.0
     try:
         ptr = int(scalar("SELECT COUNT(*) FROM bookings WHERE delivery_date=:d "
                          "AND transport_required=TRUE AND status!='cancelled'",{"d":date_str}) or 0)
@@ -1398,15 +1406,26 @@ with tab6:
         ll=sl=0.0
 
     r1,r2,r3,r4 = st.columns(4)
-    r1.metric("Liquid in today",    f"{el:.0f} m³",  delta=f"{el/LIQUID_STORAGE_CAPACITY_M3*100:.1f}%")
-    r2.metric("Liquid level",       f"{ll:.0f} m³",  delta=f"{ll/LIQUID_STORAGE_CAPACITY_M3*100:.1f}% full")
-    r3.metric("Solid in today",     f"{es:.0f} t",   delta=f"{es/SOLID_STORAGE_CAPACITY_TONS*100:.1f}%")
-    r4.metric("Solid level",        f"{sl:.0f} t",   delta=f"{sl/SOLID_STORAGE_CAPACITY_TONS*100:.1f}% full")
+    r1.metric("Liquid planned today", f"{el:.0f} m³",  delta=f"{el/LIQUID_STORAGE_CAPACITY_M3*100:.1f}%",
+              help="Still-pending bookings (status='booked') for this date")
+    r2.metric("Liquid level",         f"{ll:.0f} m³",  delta=f"{ll/LIQUID_STORAGE_CAPACITY_M3*100:.1f}% full")
+    r3.metric("Solid planned today",  f"{es:.0f} t",   delta=f"{es/SOLID_STORAGE_CAPACITY_TONS*100:.1f}%",
+              help="Still-pending bookings (status='booked') for this date")
+    r4.metric("Solid level",          f"{sl:.0f} t",   delta=f"{sl/SOLID_STORAGE_CAPACITY_TONS*100:.1f}% full")
+
+    # FIX: new row — actual recorded deliveries per form, so this no longer
+    # disappears once a booking moves from 'booked' to 'completed'.
+    d1,d2 = st.columns(2)
+    d1.metric("Liquid delivered today", f"{al:.0f} m³",
+              help="Actual quantity recorded via 'Record Delivery' for this date")
+    d2.metric("Solid delivered today",  f"{as_:.0f} t",
+              help="Actual quantity recorded via 'Record Delivery' for this date")
+
     st.divider()
     t1,t2,t3 = st.columns(3)
-    t1.metric("Plant LKW deliveries",     ptr)
-    t2.metric("Own-transport deliveries", otr)
-    t3.metric("Actually delivered",       f"{at:.0f} m³/t")
+    t1.metric("Plant LKW deliveries",       ptr)
+    t2.metric("Own-transport deliveries",   otr)
+    t3.metric("Actually delivered (total)", f"{at:.0f} m³+t")
     st.caption(f"Daily liquid outflow: −{DAILY_LIQUID_OUTFLOW_M3} m³/day")
 
     fig,axes = plt.subplots(1,2,figsize=(12,4))
