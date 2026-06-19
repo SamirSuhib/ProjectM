@@ -1371,7 +1371,7 @@ with tab5:
 # ── TAB 6 — CAPACITY REPORT ──────────────────────────────────────────────────
 with tab6:
     st.subheader(f"📊 Capacity Report — {date_str}")
-       try:
+    try:
             el = float(scalar("SELECT COALESCE(SUM(expected_tons),0) FROM bookings "
                               "WHERE delivery_date=:d AND manure_form='liquid' AND status='booked'",
                               {"d":date_str}) or 0)
@@ -1389,7 +1389,7 @@ with tab6:
                               "WHERE b.delivery_date=:d AND b.manure_form='solid'",
                               {"d":date_str}) or 0)
             at = al + as_   # combined total, kept for the CSV/Excel export below
-        except Exception as e:
+    except Exception as e:
             st.error(f"DB error: {e}"); el=es=al=as_=at=0.0
     try:
         ptr = int(scalar("SELECT COUNT(*) FROM bookings WHERE delivery_date=:d "
